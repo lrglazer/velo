@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Velo — Movement &amp; Form Analysis</title>
+<meta name="description" content="Upload any movement video. Velo maps an anatomical skeleton over it and measures joint angles, speed, force and technique.">
+<meta name="theme-color" content="#0B0E12">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Saira:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <a class="mark" href="./" aria-label="Velo home">
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5l9 14 9-14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="19" r="1.9" fill="#FF5A3C"/></svg>
+    <span>Velo</span>
+  </a>
+  <span class="tag">Markerless motion lab</span>
+  <div class="bar-right">
+    <label class="bw">Body mass <input id="bw" type="number" min="25" max="250" step="1" value="70" inputmode="numeric"> kg</label>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="stage-col">
+    <div class="stage" id="stage">
+      <canvas id="view" aria-label="Video with anatomical overlay"></canvas>
+      <div class="empty" id="empty">
+        <p class="eyebrow">Any movement · any sport</p>
+        <h1>Film it. See the bones, joints and forces underneath.</h1>
+        <p class="lede">Squat, sprint start, golf swing, pitch, jump, lift. Velo tracks 33 body landmarks per frame and rebuilds an anatomical model on top of your video.</p>
+        <div class="empty-actions">
+          <label class="btn primary">Upload a video<input id="file" type="file" accept="video/*,image/*" hidden></label>
+          <button class="btn" id="sample" type="button">Try the sample squat</button>
+        </div>
+        <p class="hint">Runs in your browser. Your video never leaves your device.</p>
+      </div>
+      <div class="status" id="status" role="status" hidden></div>
+      <div class="hud" id="hud" hidden>
+        <span><b id="hudT">0.00</b> s</span>
+        <span>Frame <b id="hudF">0</b></span>
+        <span id="hudView">—</span>
+      </div>
+    </div>
+
+    <div class="controls" id="controls" hidden>
+      <div class="seg" role="group" aria-label="Overlay">
+        <button data-mode="skeleton" aria-pressed="true">Skeleton</button>
+        <button data-mode="muscle" aria-pressed="false">Muscle</button>
+        <button data-mode="outline" aria-pressed="false">Outline</button>
+      </div>
+      <div class="transport">
+        <button class="icon" id="play" type="button" aria-label="Play or pause">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path id="playIcon" d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>
+        </button>
+        <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Scrub">
+        <select id="rate" aria-label="Playback speed"><option value="1">1×</option><option value="0.5">0.5×</option><option value="0.25" selected>0.25×</option></select>
+      </div>
+      <div class="toggles">
+        <label><input type="checkbox" id="tTriad" checked> Joint axes</label>
+        <label><input type="checkbox" id="tGrid" checked> Floor grid</label>
+        <label><input type="checkbox" id="tForce" checked> Force</label>
+        <label class="btn small">New video<input id="file2" type="file" accept="video/*,image/*" hidden></label>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel" id="panel">
+    <div class="kpis">
+      <div class="kpi"><span>Reps</span><b id="kReps">—</b><small id="kRepsJ">primary joint</small></div>
+      <div class="kpi"><span>Peak hip speed</span><b id="kSpeed">—</b><small>m/s</small></div>
+      <div class="kpi"><span>Peak ground force</span><b id="kForce">—</b><small id="kForceN">× body weight</small></div>
+      <div class="kpi"><span>Range of motion</span><b id="kRom">—</b><small id="kRomJ">degrees</small></div>
+    </div>
+
+    <section class="block">
+      <div class="block-head"><h2>Technique</h2><span class="muted" id="viewNote">Upload to analyze</span></div>
+      <ul class="checks" id="checks"><li class="check idle"><b>Waiting for movement</b><p>Checks appear once Velo has seen the body move.</p></li></ul>
+    </section>
+
+    <section class="block">
+      <div class="block-head"><h2>Joint angles</h2>
+        <div class="chips" id="angleChips"></div>
+      </div>
+      <canvas class="chart" id="cAngles" height="170"></canvas>
+    </section>
+
+    <section class="block">
+      <div class="block-head"><h2>Angular velocity</h2><span class="muted">deg/s</span></div>
+      <canvas class="chart" id="cVel" height="140"></canvas>
+    </section>
+
+    <section class="block">
+      <div class="block-head"><h2>Hip speed &amp; ground force</h2><span class="muted">m/s · × BW</span></div>
+      <canvas class="chart" id="cForce" height="140"></canvas>
+    </section>
+
+    <section class="block">
+      <div class="block-head"><h2>Live readout</h2><span class="muted">current frame</span></div>
+      <table class="readout" id="readout"><tbody></tbody></table>
+    </section>
+
+    <p class="fine">Estimates from a single camera. Force is derived from center-of-mass acceleration (F = m·(g + a)); film side-on for sagittal angles, front-on for knee tracking. Not a medical device.</p>
+  </aside>
+</main>
+
+<video id="vid" playsinline muted preload="auto" hidden></video>
+<script type="module" src="app.js"></script>
+</body>
+</html>
