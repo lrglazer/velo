@@ -174,7 +174,7 @@ function analyze() {
   // view
   const f0 = list[Math.floor(list.length / 2)].lm;
   const shW = Math.abs(f0[11].x - f0[12].x) * W, torso = len(sub(mid(px(f0, 11), px(f0, 12)), mid(px(f0, 23), px(f0, 24))));
-  const frontal = shW / (torso || 1) > 0.45;
+  const frontal = shW / (torso || 1) > 0.62;
   A = { list, t, ang, vel, trunk, speed, grf, rom, primary, reps, frontal, scale };
   if (!shownJoints.size) JOINTS.slice().sort((p, q) => rom[q.id] - rom[p.id]).slice(0, 4).forEach(j => shownJoints.add(j.id));
   updatePanel(); dirty = true;
@@ -213,7 +213,8 @@ function techniqueChecks() {
     const below = hipY >= kneeY - 0.01 * H, kMin = knee[iMin];
     if (kMin < 120) out.push(below
       ? { s: 'ok', h: 'Depth', m: `${fmt(kMin)}°`, p: 'Hip crease reaches knee height or lower. Full-depth rep.' }
-      : { s: kMin < 105 ? 'warn' : 'bad', h: 'Depth', m: `${fmt(kMin)}°`, p: `Hips stop above the knees, about ${fmt(Math.max(0, kMin - 90))}° short of parallel. Sit back and down a little further.` });
+      : kMin <= 95 ? { s: 'ok', h: 'Depth', m: `${fmt(kMin)}°`, p: 'At parallel: thighs level with the floor. Go a touch deeper for full depth.' }
+      : { s: kMin < 108 ? 'warn' : 'bad', h: 'Depth', m: `${fmt(kMin)}°`, p: `Hips stop above the knees, about ${fmt(kMin - 90)}° short of parallel. Sit back and down a little further.` });
     if (A.frontal) {
       const side = (h, k, a) => {
         const H0 = px(lm, h), K = px(lm, k), An = px(lm, a); const line = lerp(H0, An, (K.y - H0.y) / ((An.y - H0.y) || 1));
@@ -428,7 +429,7 @@ function muscle(a, b, t0, t1, off, w, S) {
 function drawMuscles(lm) {
   drawSkeleton(lm, 0.4);
   const B = body(lm), { P, S } = B;
-  const frontal = A ? A.frontal : Math.abs(B.lSh.x - B.rSh.x) / S > 0.45;
+  const frontal = A ? A.frontal : Math.abs(B.lSh.x - B.rSh.x) / S > 0.62;
   for (const s of [[23, 25, 27, 11, 13, 15], [24, 26, 28, 12, 14, 16]]) {
     const [hip, kn, an, sh, el, wr] = s.map(P);
     // anterior sign: perpendicular that points toward facing direction
