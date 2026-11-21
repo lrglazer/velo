@@ -115,13 +115,13 @@ async function loadFile(file) {
   if (!vid.videoWidth) { status('This video has no picture Velo can read. Try an MP4, or on iPhone set Camera > Formats > Most Compatible.', true); return; }
   sizeCanvas(vid.videoWidth, vid.videoHeight); showUI(); dirty = true; fx.revealAt = 0;
   try { await getLandmarker(); await setMode('VIDEO'); } catch { return; }
-  fx.revealAt = performance.now();
+  fx.revealAt = performance.now(); clip.res = null; setTimeout(recognizeSport, 1200);
   status('Analyzing. Let it play through once for the full report; slow speed samples more frames.');
   setTimeout(() => status(''), 5000);
   vid.play().catch(() => {});
 }
 async function loadImage(url) {
-  resetData();
+  resetData(); clip.res = null;
   const img = new Image(); img.src = url;
   const okImg = await img.decode().then(() => true, () => false);
   if (!okImg || !img.naturalWidth) { status('Velo could not open that file. Try a JPG or PNG photo, or an MP4 or MOV video.', true); return; }
@@ -130,7 +130,7 @@ async function loadImage(url) {
   $('#play').disabled = true; $('#scrub').disabled = true;
   try { await getLandmarker(); await setMode('IMAGE'); } catch { render(); return; }
   const r = lmk.detect(img);
-  if (r.landmarks && r.landmarks[0]) { frames.set(0, { t: 0, lm: copyLm(r.landmarks[0]), wl: copyLm(r.worldLandmarks[0]) }); fx.revealAt = performance.now(); }
+  if (r.landmarks && r.landmarks[0]) { frames.set(0, { t: 0, lm: copyLm(r.landmarks[0]), wl: copyLm(r.worldLandmarks[0]) }); fx.revealAt = performance.now(); recognizeSport(); }
   else status('No person found in this image. Try a photo where the whole body is visible.', true);
   analyze(); dirty = true;
 }
@@ -291,12 +291,6 @@ function detectSport() {
   const ent = Object.entries(sc).sort((a, b) => b[1] - a[1]), tot = ent.reduce((a, [, v]) => a + Math.exp(v * 2.2), 0);
   return { id: ent[0][0], conf: Math.exp(ent[0][1] * 2.2) / tot, scores: Object.fromEntries(ent.map(([k, v]) => [k, Math.exp(v * 2.2) / tot])) };
 }
-function currentSport() { const s = sportSel(); if (s !== 'auto') return { id: s, conf: 1, manual: true }; return A ? (A.sport || (A.sport = detectSport())) : { id: 'general', conf: 0 }; }
-function techniqueChecks() {
-  if (!A) return [];
-  const sp = currentSport().id;
-  return sp === 'golf' ? golfChecks() : sp === 'sprint' ? sprintChecks() : sp === 'jump' ? jumpChecks() : sp === 'throw' ? throwChecks() : squatChecks();
-}
 const chk = (s, h, m, p) => ({ s, h, m, p });
 const rate = (v, ok, warn, hi) => hi ? (v >= ok ? 'ok' : v >= warn ? 'warn' : 'bad') : (v <= ok ? 'ok' : v <= warn ? 'warn' : 'bad');
 // yaw of a left/right segment in the floor plane, from world landmarks (degrees)
@@ -385,6 +379,125 @@ function throwChecks() {
   return out;
 }
 
+// ---------- AI sport recognition (CLIP, runs in the browser) ----------
+// label shown, prompt for the model, which check family to run
+const LABELS = [
+ ['Golf swing','a person swinging a golf club','golf'],['Baseball batting','a baseball player swinging a bat','bat'],['Baseball pitching','a baseball pitcher throwing a pitch','throw'],
+ ['Softball','a softball player','bat'],['Cricket batting','a cricket batsman batting','bat'],['Cricket bowling','a cricket bowler bowling','throw'],['Tennis','a person playing tennis with a racket','racket'],
+ ['Pickleball','a person playing pickleball with a paddle','racket'],['Badminton','a person playing badminton','racket'],['Table tennis','a person playing table tennis','racket'],
+ ['Basketball shot','a basketball player shooting a basketball','shoot'],['Basketball','a person playing basketball','jump'],['Volleyball','a person playing volleyball','jump'],
+ ['Soccer kick','a soccer player kicking a ball','kick'],['Football throw','a quarterback throwing an american football','throw'],['Hockey','an ice hockey player with a stick','bat'],
+ ['Lacrosse','a lacrosse player','throw'],['Boxing','a boxer punching','strike'],['Martial arts','a martial artist kicking','strike'],['Wrestling / BJJ','two people wrestling or grappling','general'],
+ ['Sprinting','a sprinter running on a track','sprint'],['Running','a person jogging outdoors','sprint'],['Sprint start','a sprinter in starting blocks','sprint'],['Hurdles','an athlete jumping over a hurdle','sprint'],
+ ['Long / high jump','an athlete doing the long jump or high jump','jump'],['Box jump','a person jumping onto a box','jump'],['Shot put / discus / javelin','an athlete throwing a shot put, discus or javelin','throw'],
+ ['Swimming','a person swimming in a pool','general'],['Cycling','a person riding a bicycle','general'],['Rowing','a person rowing','general'],['Skiing','a person skiing on snow','general'],
+ ['Snowboarding','a person snowboarding','general'],['Skateboarding','a person on a skateboard','general'],['Surfing','a person surfing a wave','general'],['Gymnastics','a gymnast performing','general'],
+ ['Cheer','a cheerleader performing','jump'],['Dance','a person dancing','general'],['Figure skating','a figure skater on ice','general'],['Climbing','a person rock climbing','general'],
+ ['Yoga','a person doing a yoga pose','align'],['Plank','a person holding a plank','align'],['Push-up','a person doing a push-up','align'],['Squat','a person doing a barbell squat','squat'],
+ ['Deadlift','a person doing a deadlift','hinge'],['Bench press','a person doing a bench press','general'],['Lunge','a person doing a lunge','lunge'],['Pull-up','a person doing a pull-up','general'],
+];
+let clipP = null; const clip = { busy: false, res: null };
+async function clipClassify(img) {
+  if (!clipP) clipP = (async () => { const T = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2'); T.env.allowLocalModels = false;
+    return T.pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32'); })().catch(e => { clipP = null; throw e; });
+  const clf = await clipP, cv = document.createElement('canvas'), k = Math.min(1, 448 / Math.max(img.naturalWidth || img.videoWidth, img.naturalHeight || img.videoHeight));
+  cv.width = Math.round((img.naturalWidth || img.videoWidth) * k); cv.height = Math.round((img.naturalHeight || img.videoHeight) * k); cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+  const out = await clf(cv.toDataURL('image/jpeg', 0.9), LABELS.map(l => l[1]), { hypothesis_template: 'a photo of {}' });
+  return out.map(o => { const L = LABELS.find(l => l[1] === o.label); return { name: L[0], fam: L[2], p: o.score }; });
+}
+async function recognizeSport() {
+  if (!media || clip.busy) return; clip.busy = true; clip.res = null; updatePanel();
+  try { clip.res = await clipClassify(media); } catch (e) { clip.res = { err: true }; }
+  clip.busy = false; if (A) A.sport = null; updatePanel(); dirty = true;
+}
+const POSE_NAME = { golf: 'Golf swing', squat: 'Squat / lift', sprint: 'Sprint / run', jump: 'Jump', throw: 'Throw / pitch', general: 'General movement' };
+function currentSport() {
+  const s = sportSel(); if (s !== 'auto') { const L = LABELS.find(l => l[0] === s); return { id: L ? L[2] : s, name: L ? L[0] : POSE_NAME[s] || s, conf: 1, manual: true }; }
+  if (clip.res && !clip.res.err && clip.res[0] && clip.res[0].p > 0.2) { const r = clip.res; return { id: r[0].fam, name: r[0].name, conf: r[0].p, ai: true, alt: r.slice(1, 3) }; }
+  const d = A ? (A.sport || (A.sport = detectSport())) : { id: 'general', conf: 0 }; return { ...d, name: POSE_NAME[d.id] };
+}
+function techniqueChecks() {
+  if (!A) return []; const sp = currentSport(), f = sp.id;
+  const map = { golf: golfChecks, squat: squatChecks, sprint: sprintChecks, jump: jumpChecks, throw: throwChecks, bat: batChecks, racket: racketChecks, shoot: shootChecks, kick: kickChecks, strike: strikeChecks, align: alignChecks, hinge: hingeChecks, lunge: lungeChecks };
+  const out = (map[f] || generalChecks)();
+  return out.length ? out : generalChecks();
+}
+const mid2 = (lm, a, b) => mid(px(lm, a), px(lm, b));
+function generalChecks() {
+  const out = [], L = A.list, f = L[L.length >> 1];
+  const lean = median(A.trunk); out.push(chk(lean < 45 ? 'ok' : 'warn', 'Posture', `${fmt(lean)}° trunk tilt`, lean < 45 ? 'Torso stays controlled over the hips.' : 'Large forward tilt. Make sure it is intentional for this movement.'));
+  const base = [px(f.lm, 27).x, px(f.lm, 28).x].sort((a, b) => a - b), com = mid2(f.lm, 23, 24).x, sw = d2(f.lm, 11, 12) || 1;
+  const off = com < base[0] ? (base[0] - com) / sw : com > base[1] ? (com - base[1]) / sw : 0;
+  out.push(chk(off < 0.15 ? 'ok' : off < 0.4 ? 'warn' : 'bad', 'Balance', off < 0.15 ? 'over base' : `${fmt(off * 100)}% outside`, off < 0.15 ? 'Center of mass sits over the feet.' : 'Center of mass drifts outside the feet. Check that you are balanced.'));
+  if (L.length > 2) { const d = median(A.ang.kneeL.map((v, i) => Math.abs(v - A.ang.kneeR[i]))); out.push(chk(A.frontal ? (d < 15 ? 'ok' : 'warn') : 'idle', 'Left / right symmetry', `${fmt(d)}°`, A.frontal ? (d < 15 ? 'Both legs move evenly.' : 'One leg bends more than the other.') : 'Film face-on to compare sides.'));
+    const pj = A.primary, a = A.ang[pj.id].filter(Number.isFinite); out.push(chk('idle', 'Main joint', `${pj.name}`, `${fmt(Math.min(...a))}° to ${fmt(Math.max(...a))}°, peak ${fmt(Math.max(...A.vel[pj.id].map(Math.abs)))}°/s.`)); }
+  return out;
+}
+function batChecks() { // baseball, softball, cricket, hockey
+  const out = [], L = A.list, f0 = L[0], torso = len(sub(mid2(f0.lm, 11, 12), mid2(f0.lm, 23, 24))) || 1;
+  const stride = Math.max(...L.map(f => d2(f.lm, 27, 28) / (d2(f.lm, 11, 12) || 1)));
+  out.push(chk(stride >= 1.2 && stride <= 2.4 ? 'ok' : 'warn', 'Stance / stride', `${stride.toFixed(1)}× shoulders`, stride < 1.2 ? 'Narrow base. A wider stance gives the hips room to rotate.' : stride > 2.4 ? 'Very long stride, which can make you lunge. Keep it controlled.' : 'Solid, athletic base.'));
+  const knee = median(A.ang.kneeL.map((v, i) => (v + A.ang.kneeR[i]) / 2)); out.push(chk(knee >= 135 && knee <= 165 ? 'ok' : 'warn', 'Knee flex', `${fmt(knee)}°`, knee > 165 ? 'Legs too straight. Sit into an athletic stance.' : knee < 135 ? 'Very deep crouch. Stay a bit taller so you can rotate.' : 'Athletic knee flex.'));
+  if (L.length > 2) { let hd = 0; L.forEach(f => hd = Math.max(hd, len(sub(px(f.lm, 0), px(f0.lm, 0))) / torso)); out.push(chk(rate(hd, 0.2, 0.35), 'Head stability', `${fmt(hd * 100)}% torso`, hd <= 0.2 ? 'Head stays still through the swing, so the eyes track the ball.' : 'Head moves a lot. Keep it quiet to see the ball longer.'));
+    const sep = Math.max(...L.map(f => angDiff(yaw(f.wl, 11, 12), yaw(f.wl, 23, 24)))); out.push(chk(rate(sep, 25, 12, true), 'Hip-shoulder separation', `${fmt(sep)}°`, sep >= 25 ? 'Hips fire before the shoulders, a strong kinetic chain.' : 'Hips and shoulders turn together. Lead with the hips.')); }
+  else out.push(chk('idle', 'Swing checks', 'need video', 'Upload a swing video to check head stability and hip-shoulder separation.'));
+  return out;
+}
+function racketChecks() { // tennis, pickleball, badminton, table tennis
+  const out = [], L = A.list, R = handed() === 'right', S = R ? 12 : 11, E = R ? 14 : 13, Wr = R ? 16 : 15;
+  const reach = Math.max(...L.map(f => angle3(f.wl[S], f.wl[E], f.wl[Wr]))); out.push(chk(rate(reach, 150, 125, true), 'Hitting arm extension', `${fmt(reach)}°`, reach >= 150 ? 'Arm extends fully through contact for maximum reach and racket speed.' : 'Hitting arm stays bent. Extend through contact.'));
+  const knee = Math.min(...L.map(f => (angle3(f.wl[23], f.wl[25], f.wl[27]) + angle3(f.wl[24], f.wl[26], f.wl[28])) / 2)); out.push(chk(knee <= 150 ? 'ok' : 'warn', 'Leg drive', `${fmt(knee)}° knee bend`, knee <= 150 ? 'Knees load to push power up from the ground.' : 'Little knee bend. Load the legs to add power.'));
+  const above = Math.max(...L.map(f => (f.lm[S].y - f.lm[Wr].y) * H / (d2(f.lm, 11, 12) || 1))); out.push(chk('idle', 'Contact height', above > 0.5 ? 'overhead' : 'groundstroke', above > 0.5 ? 'Overhead contact (serve or smash).' : 'Contact below the shoulder (groundstroke).'));
+  if (L.length > 2) { const sep = Math.max(...L.map(f => angDiff(yaw(f.wl, 11, 12), yaw(f.wl, 23, 24)))); out.push(chk(rate(sep, 25, 12, true), 'Trunk rotation', `${fmt(sep)}°`, sep >= 25 ? 'Good unit turn of the shoulders against the hips.' : 'Little shoulder turn. Turn the shoulders more on the take-back.')); }
+  return out;
+}
+function shootChecks() { // basketball jump shot
+  const out = [], L = A.list, R = handed() === 'right', S = R ? 12 : 11, E = R ? 14 : 13, Wr = R ? 16 : 15;
+  const f = L.reduce((b, x) => x.lm[Wr].y < b.lm[Wr].y ? x : b, L[0]);
+  const ext = angle3(f.wl[S], f.wl[E], f.wl[Wr]); out.push(chk(rate(ext, 155, 135, true), 'Release extension', `${fmt(ext)}°`, ext >= 155 ? 'Shooting arm fully extends at release.' : 'Arm is still bent at the highest point. Finish with a full extension and follow-through.'));
+  const elbowX = Math.abs(px(f.lm, E).x - px(f.lm, Wr).x) / (d2(f.lm, 11, 12) || 1); out.push(chk(A.frontal ? rate(elbowX, 0.15, 0.3) : 'idle', 'Elbow alignment', A.frontal ? `${fmt(elbowX * 100)}% off line` : 'side view', !A.frontal ? 'Film face-on to check if the elbow flares.' : elbowX <= 0.15 ? 'Elbow stays under the ball.' : 'Elbow flares out. Keep it under the ball for a straighter shot.'));
+  const knee = Math.min(...L.map(x => (angle3(x.wl[23], x.wl[25], x.wl[27]) + angle3(x.wl[24], x.wl[26], x.wl[28])) / 2)); out.push(chk(knee <= 145 ? 'ok' : 'warn', 'Leg load', `${fmt(knee)}°`, knee <= 145 ? 'Legs load before the shot, so range comes from the legs.' : 'Shooting mostly with the arms. Bend the knees more for range.'));
+  return out;
+}
+function kickChecks() { // soccer / football kick
+  const out = [], L = A.list, f = L.reduce((b, x) => Math.max(180 - angle3(x.wl[11], x.wl[23], x.wl[25]), 180 - angle3(x.wl[12], x.wl[24], x.wl[26])) > Math.max(180 - angle3(b.wl[11], b.wl[23], b.wl[25]), 180 - angle3(b.wl[12], b.wl[24], b.wl[26])) ? x : b, L[0]);
+  const lean = A.trunk[A.list.indexOf(f)]; out.push(chk(lean <= 25 ? 'ok' : 'warn', 'Body over the ball', `${fmt(lean)}°`, lean <= 25 ? 'Chest stays over the ball, which keeps the shot low.' : 'Leaning back at contact, which sends the ball high. Stay over it.'));
+  const armOut = d2(f.lm, 15, 16) / (d2(f.lm, 11, 12) || 1); out.push(chk(armOut >= 1.6 ? 'ok' : 'warn', 'Arm balance', `${armOut.toFixed(1)}× shoulders`, armOut >= 1.6 ? 'Arms spread for balance.' : 'Arms tucked in. Open the opposite arm for balance.'));
+  const swing = Math.max(...L.map(x => Math.max(180 - angle3(x.wl[11], x.wl[23], x.wl[25]), 180 - angle3(x.wl[12], x.wl[24], x.wl[26])))); out.push(chk(rate(swing, 60, 40, true), 'Leg swing', `${fmt(swing)}° hip flexion`, swing >= 60 ? 'Big follow-through with the kicking leg.' : 'Short follow-through. Swing through the ball.'));
+  return out;
+}
+function strikeChecks() { // boxing, martial arts
+  const out = [], L = A.list, f = L[0], sw = d2(f.lm, 11, 12) || 1;
+  const guard = Math.min(d2(f.lm, 15, 0), d2(f.lm, 16, 0)) / sw; out.push(chk(rate(guard, 0.6, 1.0), 'Guard', guard <= 0.6 ? 'hands up' : 'hands low', guard <= 0.6 ? 'At least one hand stays near the chin.' : 'Hands drop away from the face. Keep the guard up.'));
+  const st = d2(f.lm, 27, 28) / sw; out.push(chk(st >= 1 && st <= 2 ? 'ok' : 'warn', 'Stance', `${st.toFixed(1)}× shoulders`, st < 1 ? 'Feet too close; easy to knock off balance.' : st > 2 ? 'Very wide stance slows footwork.' : 'Balanced fighting stance.'));
+  if (L.length > 2) { const rot = Math.max(...L.map(x => angDiff(yaw(x.wl, 23, 24), yaw(f.wl, 23, 24)))); out.push(chk(rate(rot, 30, 15, true), 'Hip rotation', `${fmt(rot)}°`, rot >= 30 ? 'Hips rotate into the strike, putting the body behind it.' : 'Striking with the arm only. Rotate the hips into it.')); }
+  return out;
+}
+function alignChecks() { // plank, push-up, yoga
+  const out = [], L = A.list, f = L[L.length >> 1];
+  const line = (angle3(f.wl[11], f.wl[23], f.wl[27]) + angle3(f.wl[12], f.wl[24], f.wl[28])) / 2;
+  out.push(chk(rate(180 - line, 10, 20), 'Body line', `${fmt(line)}°`, 180 - line <= 10 ? 'Shoulders, hips and ankles stay in a straight line.' : (mid2(f.lm, 23, 24).y < (mid2(f.lm, 11, 12).y + mid2(f.lm, 27, 28).y) / 2 ? 'Hips pike up. Lower them in line with the shoulders and ankles.' : 'Hips sag. Brace the core and squeeze the glutes.')));
+  const el = Math.min(...L.map(x => (angle3(x.wl[11], x.wl[13], x.wl[15]) + angle3(x.wl[12], x.wl[14], x.wl[16])) / 2));
+  if (L.length > 2) out.push(chk(rate(el, 95, 115), 'Push-up depth', `${fmt(el)}° elbows`, el <= 95 ? 'Chest gets low, elbows to 90° or below.' : 'Partial range. Lower until the elbows reach about 90°.'));
+  return out;
+}
+function hingeChecks() { // deadlift / RDL
+  const out = [], L = A.list, i = A.trunk.indexOf(Math.max(...A.trunk.filter(Number.isFinite))), f = L[Math.max(0, i)];
+  const kn = (angle3(f.wl[23], f.wl[25], f.wl[27]) + angle3(f.wl[24], f.wl[26], f.wl[28])) / 2;
+  out.push(chk(kn >= 120 && kn <= 165 ? 'ok' : 'warn', 'Knee bend at the bottom', `${fmt(kn)}°`, kn > 165 ? 'Legs nearly straight, more of an RDL. Fine if intended.' : kn < 120 ? 'Knees bend a lot, turning it into a squat. Push the hips back more.' : 'Hips-back hinge with soft knees.'));
+  const bar = Math.abs(mid2(f.lm, 15, 16).x - mid2(f.lm, 27, 28).x) / (d2(f.lm, 11, 12) || 1);
+  out.push(chk(A.frontal ? 'idle' : rate(bar, 0.25, 0.5), 'Bar over midfoot', A.frontal ? 'front view' : `${fmt(bar * 100)}% off`, A.frontal ? 'Film from the side to check bar path.' : bar <= 0.25 ? 'Hands and bar stay over the midfoot.' : 'Bar drifts away from the body. Keep it close to the legs.'));
+  if (L.length > 2) { const lockout = Math.min(...A.trunk.filter(Number.isFinite)); out.push(chk(lockout < 12 ? 'ok' : 'warn', 'Lockout', `${fmt(lockout)}°`, lockout < 12 ? 'Stands fully tall at the top.' : 'Does not finish tall. Squeeze the glutes to lock out.')); }
+  return out;
+}
+function lungeChecks() {
+  const out = [], L = A.list, f = L.reduce((b, x) => Math.min(angle3(x.wl[23], x.wl[25], x.wl[27]), angle3(x.wl[24], x.wl[26], x.wl[28])) < Math.min(angle3(b.wl[23], b.wl[25], b.wl[27]), angle3(b.wl[24], b.wl[26], b.wl[28])) ? x : b, L[0]);
+  const front = Math.min(angle3(f.wl[23], f.wl[25], f.wl[27]), angle3(f.wl[24], f.wl[26], f.wl[28]));
+  out.push(chk(front <= 100 ? 'ok' : front <= 115 ? 'warn' : 'bad', 'Front knee depth', `${fmt(front)}°`, front <= 100 ? 'Front knee reaches about 90°.' : 'Shallow lunge. Lower until the front thigh is near parallel.'));
+  out.push(chk(median(A.trunk) < 20 ? 'ok' : 'warn', 'Torso', `${fmt(median(A.trunk))}°`, median(A.trunk) < 20 ? 'Torso stays upright.' : 'Leaning forward. Keep the chest up over the hips.'));
+  return out;
+}
+
 // ---------- panel ----------
 function updatePanel() {
   const single = A && A.list.length < 3;
@@ -398,8 +511,8 @@ function updatePanel() {
   $('#kRomJ').textContent = A && !single ? A.primary.name.toLowerCase() : 'degrees';
   $('#viewNote').textContent = !A ? 'Upload to analyze' : (A.frontal ? 'Front view detected' : 'Side view detected') + ` · ${A.list.length} frame${A.list.length === 1 ? '' : 's'}`;
   const sp = currentSport(); const sb = $('#sportBadge');
-  if (sb) { sb.hidden = !A; if (A) { sb.querySelector('b').textContent = SPORTS[sp.id]; sb.querySelector('em').textContent = sp.manual ? 'set by you' : Math.round(sp.conf * 100) + '% sure'; sb.classList.toggle('low', !sp.manual && sp.conf < 0.5); } }
-  $('#handWrap').hidden = !['golf', 'throw'].includes(sp.id);
+  if (sb) { sb.hidden = !A; if (A) { sb.querySelector('span').textContent = sp.manual ? 'Sport' : 'Detected'; sb.querySelector('b').textContent = sp.name; sb.querySelector('em').textContent = clip.busy ? 'AI identifying…' : sp.manual ? 'set by you' : Math.round(sp.conf * 100) + '% sure' + (sp.ai ? ' · AI vision' : ' · from pose'); sb.classList.toggle('low', !sp.manual && sp.conf < 0.45); sb.title = sp.alt ? 'Also possible: ' + sp.alt.map(x => x.name + ' ' + Math.round(x.p * 100) + '%').join(', ') : ''; } }
+  $('#handWrap').hidden = !['golf', 'throw', 'racket', 'shoot', 'bat'].includes(sp.id);
   $('#hudView').textContent = !A ? '—' : A.frontal ? 'Front view' : 'Side view';
   const checks = techniqueChecks();
   $('#checks').innerHTML = checks.length ? checks.map(c => `<li class="check ${c.s}"><b>${c.h}<em>${c.m}</em></b><p>${c.p}</p></li>`).join('')
