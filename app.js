@@ -1047,8 +1047,28 @@ $('#snap').addEventListener('click', () => {
 
 // ---------- events ----------
 for (const id of ['#file', '#file2']) $(id).addEventListener('change', e => { $('#play').disabled = false; $('#scrub').disabled = false; loadFile(e.target.files[0]); e.target.value = ''; });
-const SAMPLE_VIDEO = 'https://assets.mixkit.co/videos/52082/52082-720.mp4'; // Mixkit free license
-$('#sample').addEventListener('click', () => loadVideo(SAMPLE_VIDEO, true).catch(() => loadImage('img/sample-squat.jpg')));
+// Free Mixkit squat clips (Mixkit Stock Video Free License). Velo checks each one and keeps the first
+// where the whole body, head to feet, is in frame; the choice is remembered on this device.
+const SAMPLES = [52116, 52117, 52106, 52111, 52107, 52115, 52082].map(id => `https://assets.mixkit.co/videos/${id}/${id}-720.mp4`);
+async function fullBodyIn(url) {
+  const v = document.createElement('video'); v.crossOrigin = 'anonymous'; v.muted = true; v.playsInline = true; v.src = url;
+  await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = rej; setTimeout(rej, 12000); });
+  const lm = await getLandmarker(); await setMode('IMAGE'); let best = 0;
+  for (const t of [0.3, 0.45, 0.7]) { v.currentTime = Math.min(v.duration * t, v.duration - 0.1); await new Promise(r => { v.onseeked = r; setTimeout(r, 3000); });
+    const cv = document.createElement('canvas'); cv.width = v.videoWidth; cv.height = v.videoHeight; cv.getContext('2d').drawImage(v, 0, 0);
+    const r = lm.detect(cv); const p = r.landmarks && r.landmarks[0]; if (!p) continue;
+    const inF = i => p[i].visibility > 0.6 && p[i].y > 0.01 && p[i].y < 0.99 && p[i].x > 0.01 && p[i].x < 0.99;
+    const h = Math.max(p[27].y, p[28].y) - p[0].y; if ([0, 11, 12, 23, 24, 25, 26, 27, 28].every(inF) && h > 0.35) best++; }
+  v.removeAttribute('src'); v.load(); return best >= 2;
+}
+$('#sample').addEventListener('click', async () => {
+  const btn = $('#sample'); let url = null; try { url = localStorage.getItem('velo-sample'); } catch (e) {}
+  if (!url) { btn.disabled = true;
+    for (const [i, u] of SAMPLES.entries()) { btn.textContent = `Finding a full-body clip… ${i + 1}/${SAMPLES.length}`; try { if (await fullBodyIn(u)) { url = u; break; } } catch (e) {} }
+    btn.disabled = false; btn.textContent = '▶ Play the sample squat video';
+    if (url) try { localStorage.setItem('velo-sample', url); } catch (e) {} }
+  if (url) loadVideo(url, true).catch(() => loadImage('img/sample-squat.jpg')); else loadImage('img/sample-squat.jpg');
+});
 $('#samplePhoto').addEventListener('click', e => { e.preventDefault(); loadImage('img/sample-squat.jpg'); });
 document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
   mode = b.dataset.mode; document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); dirty = true;
