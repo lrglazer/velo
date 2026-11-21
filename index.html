@@ -26,21 +26,28 @@
   <section class="stage-col">
     <div class="stage" id="stage">
       <canvas id="view" aria-label="Video with anatomical overlay"></canvas>
+      <canvas id="fx" aria-hidden="true"></canvas>
       <div class="empty" id="empty">
+        <canvas id="hero" aria-hidden="true"></canvas>
         <p class="eyebrow">Any movement · any sport</p>
         <h1>Film it. See the bones, joints and forces underneath.</h1>
         <p class="lede">Squat, sprint start, golf swing, pitch, jump, lift. Velo tracks 33 body landmarks per frame and rebuilds an anatomical model on top of your video.</p>
         <div class="empty-actions">
-          <label class="btn primary">Upload a video<input id="file" type="file" accept="video/*,image/*" hidden></label>
+          <label class="btn primary">Upload a video or photo<input id="file" type="file" accept="video/*,image/*,.heic,.heif,.mov" hidden></label>
           <button class="btn" id="sample" type="button">Try the sample squat</button>
         </div>
         <p class="hint">Runs in your browser. Your video never leaves your device.</p>
+      </div>
+      <div class="loader" id="loader" hidden>
+        <div class="rings"><i></i><i></i><i></i><b id="ldPct">0%</b></div>
+        <ul class="steps" id="ldSteps"><li>Loading neural network</li><li>Starting GPU inference</li><li>Calibrating 33-point body model</li><li>Tracking movement</li></ul>
       </div>
       <div class="status" id="status" role="status" hidden></div>
       <div class="hud" id="hud" hidden>
         <span><b id="hudT">0.00</b> s</span>
         <span>Frame <b id="hudF">0</b></span>
         <span id="hudView">—</span>
+        <span class="live"><i></i>LIVE</span>
       </div>
     </div>
 
@@ -61,7 +68,7 @@
         <label><input type="checkbox" id="tTriad" checked> Joint axes</label>
         <label><input type="checkbox" id="tGrid" checked> Floor grid</label>
         <label><input type="checkbox" id="tForce" checked> Force</label>
-        <label class="btn small">New video<input id="file2" type="file" accept="video/*,image/*" hidden></label>
+        <label class="btn small">New video<input id="file2" type="file" accept="video/*,image/*,.heic,.heif,.mov" hidden></label>
       </div>
     </div>
   </section>
@@ -73,6 +80,12 @@
       <div class="kpi"><span>Peak ground force</span><b id="kForce">—</b><small id="kForceN">× body weight</small></div>
       <div class="kpi"><span>Range of motion</span><b id="kRom">—</b><small id="kRomJ">degrees</small></div>
     </div>
+
+    <section class="block tele">
+      <div class="block-head"><h2>Live telemetry</h2><span class="live"><i></i><span id="fps">0</span> fps</span></div>
+      <canvas class="gauges" id="gauges" height="128"></canvas>
+      <pre class="stream" id="stream">Waiting for a body to track…</pre>
+    </section>
 
     <section class="block">
       <div class="block-head"><h2>Technique</h2><span class="muted" id="viewNote">Upload to analyze</span></div>
@@ -107,5 +120,5 @@
 
 <video id="vid" playsinline muted preload="auto" hidden></video>
 <script type="module" src="app.js"></script>
-</body>
+<img src="https://chalktalkstudy.com/api/px?s=velo" alt="" width="1" height="1" style="position:absolute;opacity:0;pointer-events:none"></body>
 </html>

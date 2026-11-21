@@ -68,16 +68,16 @@ async function getLandmarker() {
   if (lmk) return lmk;
   if (loading) return loading;
   loading = (async () => {
-    status('Loading the pose model (about 9 MB, first time only)…');
-    const vision = await import(`${TV}/vision_bundle.mjs`);
-    const fs = await vision.FilesetResolver.forVisionTasks(`${TV}/wasm`);
+    loader(0);
+    const vision = await import(`${TV}/vision_bundle.mjs`); loader(1);
+    const fs = await vision.FilesetResolver.forVisionTasks(`${TV}/wasm`); loader(2);
     const opts = d => ({ baseOptions: { modelAssetPath: MODEL, delegate: d }, runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     try { lmk = await vision.PoseLandmarker.createFromOptions(fs, opts('GPU')); }
     catch { lmk = await vision.PoseLandmarker.createFromOptions(fs, opts('CPU')); }
-    lmkMode = 'VIDEO';
-    status('');
+    lmkMode = 'VIDEO'; loader(3);
+    setTimeout(() => loader(-1), 500);
     return lmk;
-  })().catch(e => { loading = null; status('Could not load the pose model. Check your connection and try again. (' + (e && e.message || e) + ')', true); throw e; });
+  })().catch(e => { loading = null; loader(-1); status('Could not load the pose model. Check your connection and try again. (' + (e && e.message || e) + ')', true); throw e; });
   return loading;
 }
 async function setMode(m) { if (lmk && lmkMode !== m) { await lmk.setOptions({ runningMode: m }); lmkMode = m; } }
@@ -92,16 +92,30 @@ function sizeCanvas(w, h) {
 function resetData() { frames = new Map(); A = null; lastDetT = -1; newFrames = 0; injected = null; }
 function showUI() { $('#empty').hidden = true; $('#controls').hidden = false; $('#hud').hidden = false; }
 
+const HEIC = /\.(heic|heif)$/i, IMG = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
+async function heicToJpeg(file) {
+  status('Converting your iPhone photo (HEIC)…');
+  if (!window.heic2any) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
+  let blob = await window.heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 }); if (Array.isArray(blob)) blob = blob[0];
+  status(''); return blob;
+}
 async function loadFile(file) {
   if (!file) return;
   resetData();
+  const isHeic = /heic|heif/i.test(file.type) || HEIC.test(file.name || '');
+  if (isHeic) {
+    try { file = await heicToJpeg(file); }
+    catch (e) { status('This iPhone photo (HEIC) could not be opened. On your iPhone go to Settings > Camera > Formats > Most Compatible, or send it as a JPG.', true); return; }
+  }
   const url = URL.createObjectURL(file);
-  if (file.type.startsWith('image/')) return loadImage(url);
+  if (isHeic || (file.type || '').startsWith('image/') || IMG.test(file.name || '')) return loadImage(url);
   mediaType = 'video'; media = vid;
   vid.src = url; vid.loop = true; vid.playbackRate = +$('#rate').value;
   await new Promise((res, rej) => { vid.onloadeddata = res; vid.onerror = () => rej(new Error('This video format is not supported by your browser.')); }).catch(e => { status(e.message, true); throw e; });
-  sizeCanvas(vid.videoWidth, vid.videoHeight); showUI(); dirty = true;
+  if (!vid.videoWidth) { status('This video has no picture Velo can read. Try an MP4, or on iPhone set Camera > Formats > Most Compatible.', true); return; }
+  sizeCanvas(vid.videoWidth, vid.videoHeight); showUI(); dirty = true; fx.revealAt = 0;
   try { await getLandmarker(); await setMode('VIDEO'); } catch { return; }
+  fx.revealAt = performance.now();
   status('Analyzing. Let it play through once for the full report; slow speed samples more frames.');
   setTimeout(() => status(''), 5000);
   vid.play().catch(() => {});
@@ -109,13 +123,14 @@ async function loadFile(file) {
 async function loadImage(url) {
   resetData();
   const img = new Image(); img.src = url;
-  await img.decode().catch(() => {});
-  mediaType = 'image'; media = img; vid.pause();
+  const okImg = await img.decode().then(() => true, () => false);
+  if (!okImg || !img.naturalWidth) { status('Velo could not open that file. Try a JPG or PNG photo, or an MP4 or MOV video.', true); return; }
+  status(''); mediaType = 'image'; media = img; vid.pause(); fx.revealAt = 0;
   sizeCanvas(img.naturalWidth, img.naturalHeight); showUI(); dirty = true;
   $('#play').disabled = true; $('#scrub').disabled = true;
   try { await getLandmarker(); await setMode('IMAGE'); } catch { render(); return; }
   const r = lmk.detect(img);
-  if (r.landmarks && r.landmarks[0]) frames.set(0, { t: 0, lm: copyLm(r.landmarks[0]), wl: copyLm(r.worldLandmarks[0]) });
+  if (r.landmarks && r.landmarks[0]) { frames.set(0, { t: 0, lm: copyLm(r.landmarks[0]), wl: copyLm(r.worldLandmarks[0]) }); fx.revealAt = performance.now(); }
   else status('No person found in this image. Try a photo where the whole body is visible.', true);
   analyze(); dirty = true;
 }
@@ -139,7 +154,9 @@ function tick() {
     if (!$('#scrub').matches(':active') && vid.duration) $('#scrub').value = Math.round(t / vid.duration * 1000);
   }
   if (newFrames && performance.now() - lastAnalysis > 600) { analyze(); newFrames = 0; lastAnalysis = performance.now(); }
+  if (fx.revealAt && performance.now() - fx.revealAt < REVEAL + 100) dirty = true;
   if (dirty) { render(); dirty = false; }
+  fxFrame();
 }
 
 // ---------- analysis ----------
@@ -246,13 +263,13 @@ function techniqueChecks() {
 // ---------- panel ----------
 function updatePanel() {
   const single = A && A.list.length < 3;
-  $('#kReps').textContent = A && !single ? String(A.reps) : '—';
+  countUp('#kReps', A && !single ? String(A.reps) : '—');
   $('#kRepsJ').textContent = A && !single ? A.primary.name.toLowerCase() : 'primary joint';
-  $('#kSpeed').textContent = A && !single ? fmt(Math.max(...A.speed.filter(Number.isFinite)), 2) : '—';
+  countUp('#kSpeed', A && !single ? fmt(Math.max(...A.speed.filter(Number.isFinite)), 2) : '—');
   const gmax = A && !single ? Math.max(...A.grf.filter(Number.isFinite)) : NaN;
-  $('#kForce').textContent = Number.isFinite(gmax) ? fmt(gmax, 2) + '×' : '—';
+  countUp('#kForce', Number.isFinite(gmax) ? fmt(gmax, 2) + '×' : '—');
   $('#kForceN').textContent = Number.isFinite(gmax) ? `${fmt(gmax * (+$('#bw').value || 70) * G)} N` : '× body weight';
-  $('#kRom').textContent = A && !single ? fmt(A.rom[A.primary.id]) + '°' : '—';
+  countUp('#kRom', A && !single ? fmt(A.rom[A.primary.id]) + '°' : '—');
   $('#kRomJ').textContent = A && !single ? A.primary.name.toLowerCase() : 'degrees';
   $('#viewNote').textContent = !A ? 'Upload to analyze' : (A.frontal ? 'Front view detected' : 'Side view detected') + ` · ${A.list.length} frame${A.list.length === 1 ? '' : 's'}`;
   $('#hudView').textContent = !A ? '—' : A.frontal ? 'Front view' : 'Side view';
@@ -260,6 +277,7 @@ function updatePanel() {
   $('#checks').innerHTML = checks.length ? checks.map(c => `<li class="check ${c.s}"><b>${c.h}<em>${c.m}</em></b><p>${c.p}</p></li>`).join('')
     : '<li class="check idle"><b>Waiting for movement</b><p>Checks appear once Velo has seen the body move.</p></li>';
   // chips
+  if (single) { const a = j => fmt(angle3(A.list[0].wl[j.a], A.list[0].wl[j.b], A.list[0].wl[j.c])) + '°'; countUp('#kRom', a(JOINTS[0])); $('#kRomJ').textContent = 'left knee angle'; }
   $('#angleChips').innerHTML = JOINTS.filter(j => !A || A.rom[j.id] > 0 || single).map(j => `<button class="chip" data-j="${j.id}" aria-pressed="${shownJoints.has(j.id)}"><i style="background:${j.color}"></i>${j.name}</button>`).join('');
   drawCharts();
 }
@@ -537,11 +555,14 @@ function render() {
   $('#hudF').textContent = f ? (f.i ?? 0) + 1 : 0;
   if (!f) return;
   const lm = f.lm;
+  fx.pose = f; trackTrails(lm);
+  const rv = revealY(); ctx.save(); if (rv < H) { ctx.beginPath(); ctx.rect(0, 0, W, rv); ctx.clip(); }
   if ($('#tGrid').checked) drawGrid(lm);
   if (mode === 'skeleton') drawSkeleton(lm); else if (mode === 'muscle') drawMuscles(lm); else drawOutline(lm);
   if ($('#tTriad').checked && mode !== 'outline') drawTriads(lm);
   if ($('#tForce').checked) drawForce(lm, A && f.i != null && A.grf[f.i] != null && A.list.length > 2 ? A.grf[f.i] : 1);
   labelAngles(lm);
+  ctx.restore();
   updateReadout(f);
   if (mediaType === 'video' && !vid.paused && performance.now() - (render.lc || 0) > 250) { drawCharts(); render.lc = performance.now(); }
 }
@@ -552,6 +573,169 @@ function updateReadout(f) {
     if (A.list.length > 2) rows.push(['Hip speed', `${fmt(A.speed[f.i], 2)} m/s`], ['Ground force', `${fmt(A.grf[f.i], 2)}× BW`]);
   }
   $('#readout tBody, #readout tbody').innerHTML = rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+}
+
+// ---------- live analysis FX (overlay, telemetry, hero) ----------
+const REVEAL = 1400;
+const fx = { pose: null, revealAt: 0, trails: {}, stream: [], lastStream: 0, fpsN: 0, fpsT: performance.now(), fps: 0, g: {} };
+const fxc = $('#fx'), fctx = fxc.getContext('2d');
+const TRAIL_IDS = [15, 16, 25, 26, 27, 28];
+const NEON = '#22E6FF', MAG = '#FF3DA6', LIME = '#B6FF3B';
+const ease = k => 1 - Math.pow(1 - Math.min(1, Math.max(0, k)), 3);
+function revealY() { if (!fx.revealAt) return H; const k = (performance.now() - fx.revealAt) / REVEAL; return k >= 1 ? H : ease(k) * H; }
+function trackTrails(lm) {
+  for (const i of TRAIL_IDS) {
+    if (lm[i].v < 0.5) continue; const T = fx.trails[i] || (fx.trails[i] = []);
+    const p = { x: lm[i].x * W, y: lm[i].y * H }, last = T[T.length - 1];
+    if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 0.6) T.push(p); if (T.length > 34) T.shift();
+  }
+}
+function loader(step) {
+  const L = $('#loader'); if (step < 0) { L.hidden = true; return; } L.hidden = false;
+  [...$('#ldSteps').children].forEach((li, i) => li.className = i < step ? 'done' : i === step ? 'on' : '');
+  animatePct([12, 48, 82, 100][step]);
+}
+function animatePct(to) { const el = $('#ldPct'), from = parseInt(el.textContent) || 0, t0 = performance.now(); const f = () => { const k = Math.min(1, (performance.now() - t0) / 650); el.textContent = Math.round(from + (to - from) * ease(k)) + '%'; if (k < 1) requestAnimationFrame(f); }; f(); }
+function countUp(sel, txt) {
+  const el = $(sel), m = /^(-?\d+(?:\.\d+)?)(.*)$/.exec(txt);
+  if (!m) { el.textContent = txt; el.dataset.v = ''; return; }
+  const to = +m[1], dec = (m[1].split('.')[1] || '').length, suf = m[2], prev = parseFloat(el.dataset.v || '0');
+  if (el.dataset.v !== '' && prev === to && el.textContent === txt) return;
+  el.dataset.v = to; el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
+  const t0 = performance.now(); const f = () => { const k = Math.min(1, (performance.now() - t0) / 800); el.textContent = (prev + (to - prev) * ease(k)).toFixed(dec) + suf; if (k < 1) requestAnimationFrame(f); }; f();
+}
+function glowLine(c, pts, color, w, alpha) { if (pts.length < 2) return; c.save(); c.globalAlpha = alpha; c.strokeStyle = color; c.lineWidth = w; c.shadowColor = color; c.shadowBlur = 12; c.lineCap = 'round'; c.lineJoin = 'round'; c.beginPath(); pts.forEach((p, i) => i ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)); c.stroke(); c.restore(); }
+
+function fxFrame() {
+  const now = performance.now();
+  fx.fpsN++; if (now - fx.fpsT > 500) { fx.fps = Math.round(fx.fpsN * 1000 / (now - fx.fpsT)); fx.fpsN = 0; fx.fpsT = now; const e = $('#fps'); if (e) e.textContent = media && fx.pose ? fx.fps : 0; }
+  const st = $('#stage').getBoundingClientRect(), r = view.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+  const cw = Math.round(r.width), ch = Math.round(r.height);
+  if (fxc.width !== cw * dpr || fxc.height !== ch * dpr) { fxc.width = cw * dpr; fxc.height = ch * dpr; }
+  Object.assign(fxc.style, { left: (r.left - st.left) + 'px', top: (r.top - st.top) + 'px', width: cw + 'px', height: ch + 'px' });
+  const c = fctx; c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, cw, ch);
+  if (!media || !W) { drawGauges(null); return; }
+  const k = cw / W, t = now / 1000, f = fx.pose, rv = revealY();
+  // corner brackets
+  const L = Math.min(cw, ch) * 0.07, m = 10, pulse = 0.55 + 0.45 * Math.sin(t * 3);
+  c.save(); c.strokeStyle = NEON; c.globalAlpha = 0.5 + 0.4 * pulse; c.lineWidth = 2; c.shadowColor = NEON; c.shadowBlur = 8;
+  for (const [x, y, sx, sy] of [[m, m, 1, 1], [cw - m, m, -1, 1], [m, ch - m, 1, -1], [cw - m, ch - m, -1, -1]]) { c.beginPath(); c.moveTo(x, y + sy * L); c.lineTo(x, y); c.lineTo(x + sx * L, y); c.stroke(); }
+  c.restore();
+  // continuous scan sweep
+  const sy = ((t * 0.38) % 1) * ch, gr = c.createLinearGradient(0, sy - 60, 0, sy);
+  gr.addColorStop(0, 'rgba(34,230,255,0)'); gr.addColorStop(1, 'rgba(34,230,255,0.10)'); c.fillStyle = gr; c.fillRect(0, sy - 60, cw, 60);
+  c.fillStyle = 'rgba(34,230,255,0.35)'; c.fillRect(0, sy, cw, 1);
+  // reveal scan line
+  if (rv < H) { const y = rv * k; c.save(); c.shadowColor = LIME; c.shadowBlur = 24; c.fillStyle = LIME; c.fillRect(0, y - 1.5, cw, 3); c.restore();
+    c.fillStyle = 'rgba(182,255,59,0.07)'; c.fillRect(0, y, cw, ch - y);
+    c.font = '600 12px "JetBrains Mono",monospace'; c.fillStyle = LIME; c.fillText('SCANNING BODY · ' + Math.round(rv / H * 100) + '%', 16, Math.max(18, y - 10)); }
+  if (f) {
+    const lm = f.lm, P = i => ({ x: lm[i].x * cw, y: lm[i].y * ch }), vis = i => lm[i].v > 0.5 && lm[i].y * H <= rv;
+    // motion trails
+    for (const i of TRAIL_IDS) { const T = fx.trails[i]; if (!T || T.length < 3 || !vis(i)) continue; const col = i % 2 ? NEON : MAG;
+      for (let s = 1; s < T.length; s++) glowLine(c, [{ x: T[s - 1].x * k, y: T[s - 1].y * k }, { x: T[s].x * k, y: T[s].y * k }], col, 1 + 2.5 * s / T.length, 0.12 + 0.75 * s / T.length); }
+    // reticles on hips and knees
+    c.save(); c.lineWidth = 1.5;
+    for (const i of [23, 24, 25, 26]) { if (!vis(i)) continue; const p = P(i), R = 13 + 3 * Math.sin(t * 4 + i); c.strokeStyle = i < 25 ? MAG : NEON; c.shadowColor = c.strokeStyle; c.shadowBlur = 10;
+      c.setLineDash([5, 5]); c.lineDashOffset = -t * 30; c.beginPath(); c.arc(p.x, p.y, R, 0, Math.PI * 2); c.stroke(); c.setLineDash([]);
+      c.beginPath(); c.moveTo(p.x - R - 6, p.y); c.lineTo(p.x - R + 2, p.y); c.moveTo(p.x + R - 2, p.y); c.lineTo(p.x + R + 6, p.y); c.stroke(); }
+    c.restore();
+    // center of mass
+    if (vis(23) && vis(24)) { const h = mid(P(23), P(24)), b = 1 + 0.25 * Math.sin(t * 5); c.save(); c.strokeStyle = LIME; c.fillStyle = LIME; c.shadowColor = LIME; c.shadowBlur = 14;
+      c.beginPath(); c.arc(h.x, h.y, 6 * b, 0, Math.PI * 2); c.stroke(); c.beginPath(); c.arc(h.x, h.y, 2.5, 0, Math.PI * 2); c.fill();
+      c.globalAlpha = 0.5; c.setLineDash([3, 6]); c.beginPath(); c.moveTo(h.x, h.y); c.lineTo(h.x, ch - 6); c.stroke(); c.restore();
+      c.font = '600 11px "JetBrains Mono",monospace'; c.fillStyle = LIME; c.fillText('COM', h.x + 10, h.y - 8); }
+    // callouts: knee & hip angle with live velocity
+    const callouts = [[25, 'L KNEE', 'kneeL'], [24, 'R HIP', 'hipR']];
+    callouts.forEach(([i, lab, id], n) => { if (!vis(i)) return; const p = P(i), j = JOINTS.find(q => q.id === id); const a = angle3(f.wl[j.a], f.wl[j.b], f.wl[j.c]);
+      const vel = A && f.i != null && A.vel[id] ? A.vel[id][f.i] : NaN; const bx = n ? Math.max(8, p.x - 160) : Math.min(cw - 150, p.x + 40), by = p.y + (n ? -70 : 30);
+      c.save(); c.strokeStyle = 'rgba(34,230,255,.7)'; c.lineWidth = 1; c.beginPath(); c.moveTo(p.x, p.y); c.lineTo(bx + (n ? 140 : 0), by + 18); c.stroke();
+      c.fillStyle = 'rgba(6,12,20,.78)'; c.strokeStyle = 'rgba(34,230,255,.55)'; c.beginPath(); c.roundRect(bx, by, 140, 40, 8); c.fill(); c.stroke();
+      c.font = '600 10px "JetBrains Mono",monospace'; c.fillStyle = '#8FB9C9'; c.fillText(lab, bx + 10, by + 15);
+      c.font = '700 15px "JetBrains Mono",monospace'; c.fillStyle = '#fff'; c.fillText(fmt(a, 1) + '°', bx + 10, by + 32);
+      c.font = '500 10px "JetBrains Mono",monospace'; c.fillStyle = NEON; c.fillText(Number.isFinite(vel) ? (vel > 0 ? '+' : '') + fmt(vel) + '°/s' : 'locked', bx + 76, by + 32); c.restore(); });
+  }
+  // HUD text
+  c.font = '600 11px "JetBrains Mono",monospace'; c.textAlign = 'right';
+  const conf = f ? f.lm.reduce((a, p) => a + p.v, 0) / f.lm.length : 0;
+  c.fillStyle = f ? NEON : '#FFB547'; c.fillText(f ? `POSE LOCK · 33 PTS · CONF ${conf.toFixed(2)}` : 'SEARCHING FOR BODY' + '.'.repeat(1 + Math.floor(t * 3) % 3), cw - 16, 26);
+  c.fillStyle = '#7F95AA'; c.fillText(`${mediaType === 'video' ? fx.fps + ' FPS · ' : ''}FRAMES ${frames.size} · ${A && A.frontal ? 'FRONTAL' : 'SAGITTAL'} PLANE`, cw - 16, 42); c.textAlign = 'left';
+  drawGauges(f); pushStream(f, conf);
+}
+
+function drawGauges(f) {
+  const cv = $('#gauges'); if (!cv) return; const dpr = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth || 300, h = 128;
+  if (cv.width !== w * dpr) { cv.width = w * dpr; cv.height = h * dpr; cv.style.height = h + 'px'; }
+  const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h);
+  const G4 = ['kneeL', 'kneeR', 'hipL', 'hipR'], n = G4.length, cell = w / n, R = Math.min(cell * 0.36, 42), t = performance.now() / 1000;
+  G4.forEach((id, i) => { const j = JOINTS.find(q => q.id === id), cx = cell * i + cell / 2, cy = 58;
+    const target = f ? angle3(f.wl[j.a], f.wl[j.b], f.wl[j.c]) : 0; const cur = fx.g[id] ?? 0; const v = cur + (target - cur) * 0.18; fx.g[id] = v;
+    const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25, av = a0 + (a1 - a0) * Math.min(1, v / 180);
+    c.lineCap = 'round'; c.lineWidth = 6; c.strokeStyle = 'rgba(255,255,255,.07)'; c.beginPath(); c.arc(cx, cy, R, a0, a1); c.stroke();
+    for (let q = 0; q <= 12; q++) { const aa = a0 + (a1 - a0) * q / 12; c.strokeStyle = 'rgba(255,255,255,.18)'; c.lineWidth = 1; c.beginPath(); c.moveTo(cx + Math.cos(aa) * (R + 6), cy + Math.sin(aa) * (R + 6)); c.lineTo(cx + Math.cos(aa) * (R + 10), cy + Math.sin(aa) * (R + 10)); c.stroke(); }
+    const g = c.createLinearGradient(cx - R, cy, cx + R, cy); g.addColorStop(0, j.color); g.addColorStop(1, '#FFFFFF');
+    c.save(); c.shadowColor = j.color; c.shadowBlur = 14; c.strokeStyle = g; c.lineWidth = 6; c.beginPath(); c.arc(cx, cy, R, a0, av); c.stroke(); c.restore();
+    c.fillStyle = j.color; c.beginPath(); c.arc(cx + Math.cos(av) * R, cy + Math.sin(av) * R, 4 + Math.sin(t * 6) * 1.2, 0, Math.PI * 2); c.fill();
+    c.textAlign = 'center'; c.fillStyle = '#fff'; c.font = '700 17px "JetBrains Mono",monospace'; c.fillText(f ? Math.round(v) + '°' : '--', cx, cy + 6);
+    c.fillStyle = '#8B97A6'; c.font = '600 10px "IBM Plex Sans",sans-serif'; c.fillText(j.name.toUpperCase(), cx, h - 8); c.textAlign = 'left'; });
+}
+function pushStream(f, conf) {
+  const now = performance.now(); if (!f || now - fx.lastStream < 160) return; fx.lastStream = now;
+  const wl = f.wl, ang = id => { const j = JOINTS.find(q => q.id === id); return angle3(wl[j.a], wl[j.b], wl[j.c]); };
+  const sp = A && f.i != null && A.speed && A.list.length > 2 ? A.speed[f.i] : NaN;
+  const line = `t=${(render.lastT || 0).toFixed(2).padStart(5)}s  KNEE ${fmt(ang('kneeL'), 1).padStart(5)}/${fmt(ang('kneeR'), 1).padStart(5)}°  HIP ${fmt(ang('hipL'), 1).padStart(5)}°  ${Number.isFinite(sp) ? 'v=' + sp.toFixed(2) + 'm/s' : 'c=' + conf.toFixed(3)}`;
+  if (fx.stream[0] && fx.stream[0].slice(8) === line.slice(8)) return;
+  fx.stream.unshift(line); if (fx.stream.length > 7) fx.stream.pop(); $('#stream').textContent = fx.stream.join('\n');
+}
+
+// animated hero: a neon athlete squatting under live tracking
+function hero() {
+  const cv = $('#hero'), host = $('#empty'); if (!cv) return; const c = cv.getContext('2d'); const trail = { hip: [], knee: [] };
+  const frame = () => {
+    requestAnimationFrame(frame); if (host.hidden) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1), w = host.clientWidth, h = host.clientHeight; if (!w || !h) return;
+    if (cv.width !== w * dpr || cv.height !== h * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+    c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h); const t = performance.now() / 1000;
+    // perspective floor grid
+    const hz = h * 0.62; c.save(); c.strokeStyle = 'rgba(34,230,255,.16)'; c.lineWidth = 1;
+    for (let i = -14; i <= 14; i++) { c.beginPath(); c.moveTo(w * 0.62 + i * 14, hz); c.lineTo(w * 0.62 + i * 120, h); c.stroke(); }
+    for (let i = 0; i < 12; i++) { const z = ((i + (t * 0.6) % 1) / 12); const y = hz + (h - hz) * z * z; c.globalAlpha = z; c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); }
+    c.restore();
+    // figure (side view squat)
+    const wide = w > 760, S = Math.min(h * 0.78, wide ? w * 0.42 : w * 0.9), ox = wide ? w * 0.7 : w * 0.5, oy = h * 0.93, s = (1 - Math.cos(t * 1.6)) / 2, rad = d => d * Math.PI / 180;
+    const pt = (b, ang, L) => ({ x: b.x + Math.sin(ang) * L * S, y: b.y - Math.cos(ang) * L * S });
+    const ankle = { x: ox, y: oy }, toe = { x: ox + 0.09 * S, y: oy }, heel = { x: ox - 0.03 * S, y: oy };
+    const knee = pt(ankle, rad(6 + 36 * s), 0.25), hip = pt(knee, rad(-8 - 84 * s), 0.25), sh = pt(hip, rad(12 + 34 * s), 0.3);
+    const head = pt(sh, rad(14 + 30 * s), 0.1), elb = pt(sh, rad(150), 0.1), wr = pt(elb, rad(20), 0.08);
+    const kAng = 180 - (6 + 36 * s + 8 + 84 * s);
+    trail.hip.push(hip); trail.knee.push(knee); if (trail.hip.length > 40) { trail.hip.shift(); trail.knee.shift(); }
+    c.globalAlpha = wide ? 1 : 0.35;
+    for (const [T, col] of [[trail.hip, MAG], [trail.knee, NEON]]) for (let i = 1; i < T.length; i++) glowLine(c, [T[i - 1], T[i]], col, 1 + 3 * i / T.length, 0.1 + 0.7 * i / T.length);
+    // body silhouette glow
+    const bones = [[ankle, knee], [knee, hip], [hip, sh], [sh, head], [sh, elb], [elb, wr], [heel, toe]];
+    for (const [a, b] of bones) { glowLine(c, [a, b], 'rgba(34,230,255,.25)', 16, 1); glowLine(c, [a, b], '#E8FBFF', 3, 1); }
+    c.save(); c.fillStyle = 'rgba(34,230,255,.15)'; c.strokeStyle = NEON; c.lineWidth = 2; c.shadowColor = NEON; c.shadowBlur = 16; c.beginPath(); c.arc(head.x, head.y - 0.02 * S, 0.055 * S, 0, Math.PI * 2); c.fill(); c.stroke(); c.restore();
+    // barbell
+    c.save(); c.strokeStyle = '#9FB3C8'; c.lineWidth = 4; c.beginPath(); c.moveTo(sh.x - 0.14 * S, sh.y + 0.01 * S); c.lineTo(sh.x + 0.14 * S, sh.y + 0.01 * S); c.stroke(); c.fillStyle = '#2B3A4C'; c.strokeStyle = NEON; c.lineWidth = 1.5; c.shadowColor = NEON; c.shadowBlur = 10; c.beginPath(); c.arc(sh.x, sh.y + 0.01 * S, 0.12 * S, 0, Math.PI * 2); c.globalAlpha *= .55; c.fill(); c.globalAlpha = wide ? 1 : .35; c.stroke(); c.restore();
+    // joints
+    for (const [p, col] of [[ankle, NEON], [knee, NEON], [hip, MAG], [sh, LIME], [elb, NEON], [wr, NEON]]) { c.save(); c.fillStyle = col; c.shadowColor = col; c.shadowBlur = 18; c.beginPath(); c.arc(p.x, p.y, 5 + Math.sin(t * 5) * 1.2, 0, Math.PI * 2); c.fill(); c.restore(); }
+    // knee angle arc + label
+    const a1 = Math.atan2(ankle.y - knee.y, ankle.x - knee.x), a2 = Math.atan2(hip.y - knee.y, hip.x - knee.x);
+    c.save(); c.strokeStyle = LIME; c.lineWidth = 2.5; c.shadowColor = LIME; c.shadowBlur = 12; c.beginPath(); c.arc(knee.x, knee.y, 0.07 * S, Math.min(a1, a2), Math.max(a1, a2)); c.stroke(); c.restore();
+    c.font = '700 14px "JetBrains Mono",monospace'; c.fillStyle = LIME; c.fillText(Math.round(kAng) + '°', knee.x + 0.08 * S, knee.y + 4);
+    // reticle around hip
+    c.save(); c.strokeStyle = MAG; c.lineWidth = 1.5; c.setLineDash([6, 6]); c.lineDashOffset = -t * 40; c.beginPath(); c.arc(hip.x, hip.y, 0.06 * S, 0, Math.PI * 2); c.stroke(); c.restore();
+    // rotating HUD rings
+    c.save(); c.translate(ox - 0.02 * S, oy - 0.42 * S); c.strokeStyle = 'rgba(34,230,255,.22)'; c.lineWidth = 1;
+    for (const [r0, sp, dash] of [[0.5, 0.2, [2, 10]], [0.56, -0.12, [30, 14]], [0.62, 0.05, [1, 5]]]) { c.save(); c.rotate(t * sp); c.setLineDash(dash); c.beginPath(); c.arc(0, 0, r0 * S, 0, Math.PI * 2); c.stroke(); c.restore(); }
+    c.restore();
+    // floating telemetry
+    if (wide) { c.font = '600 11px "JetBrains Mono",monospace'; const rows = [['KNEE FLEX', Math.round(kAng) + '°', NEON], ['HIP DEPTH', (s * 100).toFixed(0) + '%', MAG], ['BAR PATH Δx', (Math.sin(t * 1.6) * 1.8).toFixed(1) + ' cm', LIME], ['GRF', (1 + 0.35 * Math.sin(t * 1.6 + 1)).toFixed(2) + '× BW', '#FFB547']];
+      rows.forEach(([a, b, col], i) => { const x = Math.min(ox + 0.24 * S, w - 166), y = oy - 0.98 * S + i * 34; c.fillStyle = 'rgba(6,12,20,.7)'; c.strokeStyle = col; c.globalAlpha = .9; c.beginPath(); c.roundRect(x, y, 150, 26, 6); c.fill(); c.globalAlpha = .45; c.stroke(); c.globalAlpha = 1; c.fillStyle = '#8FA3B6'; c.fillText(a, x + 8, y + 17); c.fillStyle = col; c.textAlign = 'right'; c.fillText(b, x + 142, y + 17); c.textAlign = 'left'; }); }
+    // scan line
+    const sy = ((t * 0.3) % 1) * h; c.globalAlpha = 1; const gr = c.createLinearGradient(0, sy - 80, 0, sy); gr.addColorStop(0, 'rgba(34,230,255,0)'); gr.addColorStop(1, 'rgba(34,230,255,.09)'); c.fillStyle = gr; c.fillRect(0, sy - 80, w, 80);
+  };
+  frame();
 }
 
 // ---------- events ----------
@@ -578,9 +762,12 @@ window.__velo = {
   async injectImage(src, lm, wl) {
     const img = new Image(); img.src = src; await img.decode();
     resetData(); mediaType = 'image'; media = img; sizeCanvas(img.naturalWidth, img.naturalHeight); showUI();
-    frames.set(0, { t: 0, lm, wl }); analyze(); dirty = true;
+    frames.set(0, { t: 0, lm, wl }); analyze(); dirty = true; fx.revealAt = performance.now();
   },
   setMode(m) { document.querySelector(`.seg [data-mode="${m}"]`).click(); },
+  dump() { return [...frames.values()][0] || null; },
+  loadFile,
 };
 updatePanel();
 requestAnimationFrame(tick);
+hero();
