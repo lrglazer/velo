@@ -288,7 +288,7 @@ $('#angleChips').addEventListener('click', e => {
 });
 
 function chart(cv, series, opt = {}) {
-  const dpr = Math.min(2, window.devicePixelRatio || 1), w = Math.max(200, cv.clientWidth || cv.parentElement.clientWidth || 300), h = +cv.getAttribute('height');
+  const dpr = Math.min(2, window.devicePixelRatio || 1), w = Math.max(200, cv.clientWidth || cv.parentElement.clientWidth || 300), h = +(cv.dataset.h || (cv.dataset.h = cv.getAttribute('height')));
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px'; }
   const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h);
   c.fillStyle = 'rgba(4,8,14,.55)'; c.fillRect(0, 0, w, h);
@@ -750,7 +750,7 @@ const v3 = { yaw: 0.6, drag: null, auto: true, last: performance.now() };
   cv.addEventListener('pointermove', e => { if (v3.drag) v3.yaw = v3.drag.yaw + (e.clientX - v3.drag.x) * 0.012; });
   const up = () => { v3.drag = null; setTimeout(() => { if (!v3.drag) v3.auto = true; }, 2500); };
   cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up); })();
-function sizeCv(cv) { const dpr = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth || 260, h = +cv.getAttribute('height'); if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px'; } const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h); return [c, w, h]; }
+function sizeCv(cv) { const dpr = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth || 260, h = +(cv.dataset.h || (cv.dataset.h = cv.getAttribute('height'))); if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px'; } const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h); return [c, w, h]; }
 function draw3D(f) {
   const cv = $('#three'); if (!cv) return; const [c, w, h] = sizeCv(cv), now = performance.now(), t = now / 1000;
   if (v3.auto) v3.yaw += (now - v3.last) / 1000 * 0.5; v3.last = now;
