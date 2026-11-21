@@ -129,3 +129,10 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 .duo{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:14px}
 #three,#score{width:100%;display:block;cursor:grab}#three:active{cursor:grabbing}#score{cursor:default}
 @media (max-width:560px){.duo{grid-template-columns:1fr}}
+.sportbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:-2px 0 12px}
+.sportbadge{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;border:1px solid rgba(182,255,59,.45);background:rgba(182,255,59,.08);font-size:12px;box-shadow:0 0 18px -6px var(--lime);animation:slidein .5s ease}
+.sportbadge i{width:7px;height:7px;border-radius:50%;background:var(--lime);box-shadow:0 0 8px var(--lime);animation:blink 1s infinite}
+.sportbadge span{color:#8B97A6;font:600 10px 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase}
+.sportbadge b{color:#fff;font:600 13px Saira,sans-serif}.sportbadge em{font-style:normal;color:var(--lime);font:500 11px 'JetBrains Mono',monospace}
+.sportbadge.low{border-color:rgba(255,181,71,.5);background:rgba(255,181,71,.08);box-shadow:none}.sportbadge.low i{background:var(--warn);box-shadow:0 0 8px var(--warn)}.sportbadge.low em{color:var(--warn)}
+.sel{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}

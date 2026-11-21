@@ -193,6 +193,7 @@ function analyze() {
   const shW = Math.abs(f0[11].x - f0[12].x) * W, torso = len(sub(mid(px(f0, 11), px(f0, 12)), mid(px(f0, 23), px(f0, 24))));
   const frontal = shW / (torso || 1) > 0.62;
   A = { list, t, ang, vel, trunk, speed, grf, rom, primary, reps, frontal, scale };
+  A.sport = detectSport();
   if (!shownJoints.size) JOINTS.slice().sort((p, q) => rom[q.id] - rom[p.id]).slice(0, 4).forEach(j => shownJoints.add(j.id));
   updatePanel(); dirty = true;
 }
@@ -216,7 +217,7 @@ function nearest(t) {
 }
 
 // ---------- technique ----------
-function techniqueChecks() {
+function squatChecks() {
   if (!A) return [];
   const out = [], L = A.list;
   const knee = A.ang.kneeL.map((v, i) => (v + A.ang.kneeR[i]) / 2);
@@ -260,6 +261,130 @@ function techniqueChecks() {
   return out;
 }
 
+// ---------- sport recognition + sport-specific checks ----------
+const SPORTS = { golf: 'Golf swing', squat: 'Squat / lift', sprint: 'Sprint / run', jump: 'Jump', throw: 'Throw / pitch', general: 'General movement' };
+const sportSel = () => ($('#sport') || {}).value || 'auto';
+const handed = () => ($('#hand') || {}).value || 'right';
+const clamp01 = x => Math.max(0, Math.min(1, x));
+const d2 = (lm, a, b) => Math.hypot((lm[a].x - lm[b].x) * W, (lm[a].y - lm[b].y) * H);
+// Reads each frame's pose and scores how much it looks like each sport. Returns {id, conf, scores}.
+function detectSport() {
+  if (!A) return { id: 'general', conf: 0, scores: {} };
+  const L = A.list, n = L.length, sc = { golf: 0, squat: 0, sprint: 0, jump: 0, throw: 0, general: 0.15 };
+  const fr = L.map(f => { const lm = f.lm, sw = d2(lm, 11, 12) || 1, shY = (lm[11].y + lm[12].y) / 2, hipY = (lm[23].y + lm[24].y) / 2, legLen = Math.abs((lm[27].y + lm[28].y) / 2 - hipY) || 0.3;
+    return { together: d2(lm, 15, 16) / sw, wristUp: Math.max(shY - lm[15].y, shY - lm[16].y) / legLen, oneUp: Math.abs(lm[15].y - lm[16].y) / legLen, stride: Math.abs(lm[27].x - lm[28].x) * W / sw,
+      kneeLift: Math.abs(lm[25].y - lm[26].y) / legLen, handsLow: ((lm[15].y + lm[16].y) / 2 - shY) / legLen, hipY, feetY: (lm[27].y + lm[28].y) / 2, legLen }; });
+  const med = k => median(fr.map(f => f[k])), mx = k => Math.max(...fr.map(f => f[k]).filter(Number.isFinite));
+  const trunk = median(A.trunk), kneeMin = Math.min(...A.ang.kneeL.map((v, i) => (v + A.ang.kneeR[i]) / 2).filter(Number.isFinite));
+  // golf: hands joined through the motion, hinged torso, feet planted shoulder width
+  sc.golf += 1.4 * clamp01((0.7 - med('together')) / 0.5) + 0.8 * clamp01(1 - Math.abs(trunk - 35) / 25) + 0.4 * clamp01(1 - Math.abs(med('stride') - 1.1) / 0.8);
+  if (n > 2) sc.golf += 0.8 * clamp01(mx('wristUp') / 0.6) * clamp01((0.7 - med('together')) / 0.4);
+  // squat / lift: deep knee bend, hands at shoulders or on a wide bar, feet level
+  sc.squat += 1.2 * clamp01((150 - kneeMin) / 60) + 0.6 * clamp01((0.25 - Math.abs(med('handsLow'))) / 0.25) * clamp01((med('together') - 0.8) / 0.8) + 0.4 * clamp01((0.15 - med('kneeLift')) / 0.15);
+  if (n > 2) sc.squat += 0.6 * clamp01(((A.rom.kneeL + A.rom.kneeR) / 2 - 30) / 50);
+  // sprint: one knee driven high, long stride, arms apart, forward lean
+  sc.sprint += 1.1 * clamp01(mx('kneeLift') / 0.45) + 0.6 * clamp01((mx('stride') - 1.4) / 1.5) + 0.5 * clamp01((med('together') - 0.9) / 1) + 0.3 * clamp01((trunk - 5) / 20);
+  // jump: hips travel up and both feet leave together, arms swing overhead
+  if (n > 2) { const hy = fr.map(f => f.hipY), fy = fr.map(f => f.feetY), ll = med('legLen'); sc.jump += 1.4 * clamp01(((Math.max(...hy) - Math.min(...hy)) / ll - 0.25) / 0.4) * clamp01(((Math.max(...fy) - Math.min(...fy)) / ll - 0.1) / 0.3) + 0.4 * clamp01(mx('wristUp') / 0.8) * clamp01((0.15 - med('kneeLift')) / 0.15); }
+  // throw / pitch: one arm high while the other is low, wide stride, hands apart
+  sc.throw += 1.0 * clamp01((mx('oneUp') - 0.5) / 0.6) * clamp01((med('together') - 1) / 1) + 0.5 * clamp01((mx('stride') - 1.5) / 1.5);
+  const ent = Object.entries(sc).sort((a, b) => b[1] - a[1]), tot = ent.reduce((a, [, v]) => a + Math.exp(v * 2.2), 0);
+  return { id: ent[0][0], conf: Math.exp(ent[0][1] * 2.2) / tot, scores: Object.fromEntries(ent.map(([k, v]) => [k, Math.exp(v * 2.2) / tot])) };
+}
+function currentSport() { const s = sportSel(); if (s !== 'auto') return { id: s, conf: 1, manual: true }; return A ? (A.sport || (A.sport = detectSport())) : { id: 'general', conf: 0 }; }
+function techniqueChecks() {
+  if (!A) return [];
+  const sp = currentSport().id;
+  return sp === 'golf' ? golfChecks() : sp === 'sprint' ? sprintChecks() : sp === 'jump' ? jumpChecks() : sp === 'throw' ? throwChecks() : squatChecks();
+}
+const chk = (s, h, m, p) => ({ s, h, m, p });
+const rate = (v, ok, warn, hi) => hi ? (v >= ok ? 'ok' : v >= warn ? 'warn' : 'bad') : (v <= ok ? 'ok' : v <= warn ? 'warn' : 'bad');
+// yaw of a left/right segment in the floor plane, from world landmarks (degrees)
+const yaw = (wl, a, b) => Math.atan2(wl[a].z - wl[b].z, wl[a].x - wl[b].x) * 180 / Math.PI;
+const angDiff = (a, b) => { let d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+function golfPhases() {
+  const L = A.list, lead = handed() === 'right' ? 15 : 16, wy = L.map(f => f.lm[lead].y), n = L.length;
+  const a0 = wy[0]; let start = 0; for (let i = 1; i < n; i++) if (a0 - wy[i] > 0.04) { start = Math.max(0, i - 1); break; }
+  let top = start; for (let i = start; i < n; i++) if (wy[i] < wy[top]) top = i;
+  let imp = top; for (let i = top; i < n && L[i].t - L[top].t < 1.2; i++) if (wy[i] > wy[imp]) imp = i;
+  return { address: 0, start, top, impact: imp, finish: n - 1 };
+}
+function golfChecks() {
+  const out = [], L = A.list, single = L.length < 3, R = handed() === 'right';
+  const LS = R ? 11 : 12, LE = R ? 13 : 14, LW = R ? 15 : 16, LH = R ? 23 : 24, TH = R ? 24 : 23, LA = R ? 27 : 28, TK = R ? 26 : 25;
+  const f0 = L[0], tilt0 = A.trunk[0], knee0 = (A.ang.kneeL[0] + A.ang.kneeR[0]) / 2;
+  out.push(chk(Number.isFinite(tilt0) && tilt0 >= 25 && tilt0 <= 50 ? 'ok' : tilt0 >= 18 && tilt0 <= 58 ? 'warn' : 'bad', 'Address: spine tilt', `${fmt(tilt0)}°`,
+    tilt0 < 25 ? 'Standing too tall. Hinge from the hips until the arms hang under the shoulders (about 30–45°).' : tilt0 > 50 ? 'Bent over too far. Stand a little taller so you can turn freely.' : 'Athletic hinge from the hips, a good base to turn around.'));
+  out.push(chk(knee0 >= 145 && knee0 <= 168 ? 'ok' : knee0 >= 135 && knee0 <= 175 ? 'warn' : 'bad', 'Address: knee flex', `${fmt(knee0)}°`,
+    knee0 > 168 ? 'Knees almost locked. Add a soft flex so the legs can support the turn.' : knee0 < 145 ? 'Too much knee bend, almost sitting. Straighten slightly and hinge more from the hips.' : 'Soft, athletic knee flex.'));
+  const sh = mid(px(f0.lm, 11), px(f0.lm, 12)), hands = mid(px(f0.lm, 15), px(f0.lm, 16)), torso = len(sub(sh, mid(px(f0.lm, 23), px(f0.lm, 24)))) || 1;
+  if (single) {
+    const tog = d2(f0.lm, 15, 16) / (d2(f0.lm, 11, 12) || 1);
+    out.push(chk(tog < 0.5 ? 'ok' : 'warn', 'Grip: hands together', tog < 0.5 ? 'joined' : 'apart', tog < 0.5 ? 'Both hands work as one unit on the club.' : 'Hands look separated. Both hands should be together on the grip.'));
+    const stance = d2(f0.lm, 27, 28) / (d2(f0.lm, 11, 12) || 1);
+    if (!A.frontal) out.push(chk('idle', 'Stance width', 'side view', 'Film face-on to measure stance width.')); else out.push(chk(stance >= 0.8 && stance <= 1.6 ? 'ok' : 'warn', 'Stance width', `${stance.toFixed(2)}× shoulders`, stance < 0.8 ? 'Feet are narrow. Widen to about shoulder width for a stable turn.' : stance > 1.6 ? 'Very wide stance. It can block the hip turn; bring the feet in a little.' : 'Feet about shoulder width, a stable base.'));
+    out.push(chk('idle', 'Swing checks', 'need video', 'A photo shows one position. Upload a swing video to check turn, head stability, lead arm, tempo, sway and finish.'));
+    return out;
+  }
+  const P = golfPhases(), ft = L[P.top], fi = L[P.impact], ff = L[P.finish];
+  // lead arm at the top
+  const arm = angle3(ft.wl[LS], ft.wl[LE], ft.wl[LW]);
+  out.push(chk(rate(arm, 160, 145, true), 'Top: lead arm', `${fmt(arm)}°`, arm >= 160 ? 'Lead arm stays long and straight, which keeps the swing wide.' : 'Lead elbow folds at the top. Keep the lead arm extended for width and consistency.'));
+  // shoulder and hip turn (world-coordinate estimate)
+  const shT = angDiff(yaw(ft.wl, 11, 12), yaw(f0.wl, 11, 12)), hpT = angDiff(yaw(ft.wl, 23, 24), yaw(f0.wl, 23, 24)), xf = shT - hpT;
+  out.push(chk(rate(shT, 80, 60, true), 'Top: shoulder turn', `${fmt(shT)}°`, shT >= 80 ? 'Full shoulder turn, close to 90°.' : 'Short shoulder turn. Turn your back to the target for more power. (Estimate from one camera.)'));
+  out.push(chk(xf >= 25 ? 'ok' : xf >= 12 ? 'warn' : 'bad', 'Top: X-factor (shoulders vs hips)', `${fmt(xf)}°`, xf >= 25 ? `Shoulders turn ${fmt(xf)}° more than the hips (${fmt(hpT)}°), storing energy for the downswing.` : `Hips turn almost as much as the shoulders (${fmt(hpT)}°). Resist with the lower body to build separation.`));
+  // head stability address -> impact
+  let hd = 0; for (let i = 0; i <= P.impact; i++) hd = Math.max(hd, len(sub(px(L[i].lm, 0), px(f0.lm, 0))) / torso);
+  out.push(chk(rate(hd, 0.12, 0.22), 'Head stability', `${fmt(hd * 100)}% torso`, hd <= 0.12 ? 'Head stays quiet through impact.' : 'Head moves a lot before impact. Keep your eyes on the ball and the head centered.'));
+  // hip sway on the backswing
+  const hipW = d2(f0.lm, 23, 24) || 1, sway = Math.abs(mid(px(ft.lm, 23), px(ft.lm, 24)).x - mid(px(f0.lm, 23), px(f0.lm, 24)).x) / hipW;
+  out.push(chk(A.frontal ? rate(sway, 0.25, 0.45) : 'idle', 'Backswing: hip sway', A.frontal ? `${fmt(sway * 100)}% hip width` : 'side view', !A.frontal ? 'Film face-on to measure sway.' : sway <= 0.25 ? 'Hips rotate in place instead of sliding.' : 'Hips slide away from the target. Turn around the trail hip instead of swaying.'));
+  // trail knee holds its flex
+  const tk0 = angle3(f0.wl[TH], f0.wl[TK], f0.wl[TK + 2]), tkT = angle3(ft.wl[TH], ft.wl[TK], ft.wl[TK + 2]);
+  out.push(chk(rate(tkT - tk0, 8, 15), 'Backswing: trail knee', `${tkT - tk0 >= 0 ? '+' : ''}${fmt(tkT - tk0)}°`, tkT - tk0 <= 8 ? 'Trail knee keeps its flex, giving a stable post to turn against.' : 'Trail leg straightens on the backswing. Keep some flex to stay grounded.'));
+  // spine angle kept through impact
+  const sd = Math.abs(A.trunk[P.impact] - tilt0);
+  out.push(chk(rate(sd, 8, 15), 'Impact: spine angle held', `${fmt(sd)}° change`, sd <= 8 ? 'Posture stays the same from address to impact.' : 'Early extension: the torso stands up before impact. Keep your chest over the ball.'));
+  // tempo
+  const bs = L[P.top].t - L[P.start].t, ds = L[P.impact].t - L[P.top].t, ratio = ds > 0 ? bs / ds : NaN;
+  out.push(chk(Number.isFinite(ratio) ? (ratio >= 2.5 && ratio <= 3.6 ? 'ok' : ratio >= 1.8 && ratio <= 4.5 ? 'warn' : 'bad') : 'idle', 'Tempo (back : down)', Number.isFinite(ratio) ? `${ratio.toFixed(1)} : 1` : '—',
+    !Number.isFinite(ratio) ? 'Need the full swing in the clip to time it.' : ratio < 2.5 ? 'Backswing is rushed compared with the downswing. Tour players average about 3 : 1.' : ratio > 3.6 ? 'Very slow backswing for the downswing speed. Aim for about 3 : 1.' : 'Smooth tempo, close to the 3 : 1 tour average.'));
+  // balanced finish over the lead side
+  const over = Math.abs(mid(px(ff.lm, 23), px(ff.lm, 24)).x - px(ff.lm, LA).x) / hipW, up = A.trunk[P.finish];
+  out.push(chk(over < 0.6 && up < 30 ? 'ok' : over < 1 ? 'warn' : 'bad', 'Finish: balance', over < 0.6 ? 'on lead side' : 'hanging back', over < 0.6 && up < 30 ? 'Weight finishes over the lead foot, tall and balanced.' : 'Weight stays on the trail side at the finish. Rotate through and hold a tall finish over the lead foot.'));
+  // hand speed (info)
+  const hs = Math.max(...L.slice(P.top, P.impact + 1).map((f, k, a) => k ? len(sub(px(f.lm, LW), px(a[k - 1].lm, LW))) * A.scale / Math.max(1e-3, f.t - a[k - 1].t) : 0));
+  if (Number.isFinite(hs) && hs > 0) out.push(chk('idle', 'Peak hand speed', `${hs.toFixed(1)} m/s`, `Fastest lead-hand speed on the downswing (≈ ${(hs * 2.237).toFixed(0)} mph).`));
+  return out;
+}
+function sprintChecks() {
+  const out = [], L = A.list;
+  const lean = median(A.trunk); out.push(chk(lean >= 5 && lean <= 20 ? 'ok' : lean <= 30 ? 'warn' : 'bad', 'Body lean', `${fmt(lean)}°`, lean < 5 ? 'Very upright. A slight forward lean from the ankles helps acceleration.' : lean > 20 ? 'Leaning a lot. Fine in the first steps of a start, but run taller once up to speed.' : 'Good forward lean from the ankles.'));
+  const drive = Math.max(...L.map(f => Math.max(180 - angle3(f.wl[11], f.wl[23], f.wl[25]), 180 - angle3(f.wl[12], f.wl[24], f.wl[26]))));
+  out.push(chk(rate(drive, 70, 50, true), 'Knee drive', `${fmt(drive)}° hip flexion`, drive >= 70 ? 'High knee drive.' : 'Low knee lift. Drive the knee up toward hip height.'));
+  const elbow = median(L.map(f => (angle3(f.wl[11], f.wl[13], f.wl[15]) + angle3(f.wl[12], f.wl[14], f.wl[16])) / 2));
+  out.push(chk(elbow >= 70 && elbow <= 110 ? 'ok' : 'warn', 'Arm angle', `${fmt(elbow)}°`, elbow >= 70 && elbow <= 110 ? 'Elbows near 90°, a powerful arm swing.' : 'Arms too straight or too bent. Keep the elbows near 90° and swing from the shoulder.'));
+  if (L.length < 3) out.push(chk('idle', 'Stride checks', 'need video', 'Upload a running clip to check stride and ground contact.'));
+  return out;
+}
+function jumpChecks() {
+  const out = [], knee = A.ang.kneeL.map((v, i) => (v + A.ang.kneeR[i]) / 2), dip = Math.min(...knee.filter(Number.isFinite));
+  out.push(chk(dip >= 90 && dip <= 130 ? 'ok' : 'warn', 'Countermovement depth', `${fmt(dip)}°`, dip < 90 ? 'Very deep dip. A quicker, shallower dip (about 100–120°) is usually more explosive.' : dip > 130 ? 'Shallow dip. Load the hips and knees a bit more.' : 'Good loading depth.'));
+  const g = Math.max(...A.grf.filter(Number.isFinite)); if (Number.isFinite(g)) out.push(chk('idle', 'Peak ground force', `${g.toFixed(2)}× BW`, 'Estimated from how fast the hips accelerate.'));
+  out.push(...squatChecks().filter(c => /Knee tracking|symmetry/.test(c.h)));
+  return out;
+}
+function throwChecks() {
+  const out = [], R = handed() === 'right', S = R ? 12 : 11, E = R ? 14 : 13, Wr = R ? 16 : 15;
+  const elbowUp = Math.max(...A.list.map(f => (f.lm[S].y - f.lm[E].y) * H / (d2(f.lm, 11, 12) || 1)));
+  out.push(chk(elbowUp > -0.1 ? 'ok' : 'warn', 'Elbow height', elbowUp > -0.1 ? 'at shoulder' : 'low', elbowUp > -0.1 ? 'Throwing elbow reaches shoulder height.' : 'Elbow drops below the shoulder, which stresses the arm. Get it up to shoulder level.'));
+  const stride = Math.max(...A.list.map(f => d2(f.lm, 27, 28) / (d2(f.lm, 11, 12) || 1)));
+  out.push(chk(rate(stride, 2.2, 1.5, true), 'Stride length', `${stride.toFixed(1)}× shoulders`, stride >= 2.2 ? 'Long stride toward the target.' : 'Short stride. Step further toward the target to use the legs.'));
+  if (A.list.length > 2) { const f = A.list[A.list.length >> 1], sep = angDiff(yaw(f.wl, 11, 12), yaw(f.wl, 23, 24)); out.push(chk(rate(sep, 30, 15, true), 'Hip-shoulder separation', `${fmt(sep)}°`, sep >= 30 ? 'Hips open before the shoulders, a strong kinetic chain.' : 'Hips and shoulders turn together. Lead with the hips.')); }
+  return out;
+}
+
 // ---------- panel ----------
 function updatePanel() {
   const single = A && A.list.length < 3;
@@ -272,6 +397,9 @@ function updatePanel() {
   countUp('#kRom', A && !single ? fmt(A.rom[A.primary.id]) + '°' : '—');
   $('#kRomJ').textContent = A && !single ? A.primary.name.toLowerCase() : 'degrees';
   $('#viewNote').textContent = !A ? 'Upload to analyze' : (A.frontal ? 'Front view detected' : 'Side view detected') + ` · ${A.list.length} frame${A.list.length === 1 ? '' : 's'}`;
+  const sp = currentSport(); const sb = $('#sportBadge');
+  if (sb) { sb.hidden = !A; if (A) { sb.querySelector('b').textContent = SPORTS[sp.id]; sb.querySelector('em').textContent = sp.manual ? 'set by you' : Math.round(sp.conf * 100) + '% sure'; sb.classList.toggle('low', !sp.manual && sp.conf < 0.5); } }
+  $('#handWrap').hidden = !['golf', 'throw'].includes(sp.id);
   $('#hudView').textContent = !A ? '—' : A.frontal ? 'Front view' : 'Side view';
   const checks = techniqueChecks();
   $('#checks').innerHTML = checks.length ? checks.map(c => `<li class="check ${c.s}"><b>${c.h}<em>${c.m}</em></b><p>${c.p}</p></li>`).join('')
@@ -807,6 +935,7 @@ document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click'
   mode = b.dataset.mode; document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); dirty = true;
 }));
 ['#tTriad', '#tGrid', '#tForce'].forEach(id => $(id).addEventListener('change', () => dirty = true));
+['#sport', '#hand'].forEach(id => $(id).addEventListener('change', () => { updatePanel(); dirty = true; }));
 $('#bw').addEventListener('input', () => { updatePanel(); dirty = true; });
 $('#play').addEventListener('click', () => { if (mediaType !== 'video') return; vid.paused ? vid.play() : vid.pause(); });
 vid.addEventListener('play', () => $('#playIcon').setAttribute('d', 'M4 2.5h3v11H4zM9 2.5h3v11H9z'));

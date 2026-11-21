@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#0B0E12">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Saira:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <header class="bar">
@@ -95,6 +95,11 @@
 
     <section class="block">
       <div class="block-head"><h2>Technique</h2><span class="muted" id="viewNote">Upload to analyze</span></div>
+      <div class="sportbar">
+        <div class="sportbadge" id="sportBadge" hidden><i></i><span>Detected</span><b>—</b><em></em></div>
+        <label class="sel">Sport <select id="sport"><option value="auto">Auto-detect</option><option value="golf">Golf swing</option><option value="squat">Squat / lift</option><option value="sprint">Sprint / run</option><option value="jump">Jump</option><option value="throw">Throw / pitch</option></select></label>
+        <label class="sel" id="handWrap" hidden><select id="hand"><option value="right">Right-handed</option><option value="left">Left-handed</option></select></label>
+      </div>
       <ul class="checks" id="checks"><li class="check idle"><b>Waiting for movement</b><p>Checks appear once Velo has seen the body move.</p></li></ul>
     </section>
 
@@ -125,6 +130,6 @@
 </main>
 
 <video id="vid" playsinline muted preload="auto" hidden></video>
-<script type="module" src="app.js?v=5"></script>
+<script type="module" src="app.js?v=6"></script>
 <img src="https://chalktalkstudy.com/api/px?s=velo" alt="" width="1" height="1" style="position:absolute;opacity:0;pointer-events:none"></body>
 </html>
