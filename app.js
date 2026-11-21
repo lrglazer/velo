@@ -755,13 +755,14 @@ function draw3D(f) {
   const cv = $('#three'); if (!cv) return; const [c, w, h] = sizeCv(cv), now = performance.now(), t = now / 1000;
   if (v3.auto) v3.yaw += (now - v3.last) / 1000 * 0.5; v3.last = now;
   c.fillStyle = 'rgba(4,8,14,.55)'; c.fillRect(0, 0, w, h);
-  const cx = w / 2, cy = h * 0.46, S = h * 0.56, cs = Math.cos(v3.yaw), sn = Math.sin(v3.yaw), tilt = 0.32;
-  const proj = p => { const x = p.x * cs - p.z * sn, z = p.x * sn + p.z * cs; const y = p.y * Math.cos(tilt) - z * Math.sin(tilt), d = p.y * Math.sin(tilt) + z * Math.cos(tilt); return { x: cx + x * S / 0.95, y: cy + y * S / 0.95, d }; };
+  const ys = f ? f.wl.map(p => p.y).filter(Number.isFinite) : [-0.8, 0.9], y0 = Math.min(...ys), y1 = Math.max(...ys), span = Math.max(0.6, y1 - y0);
+  const cs = Math.cos(v3.yaw), sn = Math.sin(v3.yaw), tilt = 0.32, K = h * 0.74 / span, ym = (y0 + y1) / 2, cx = w / 2, cy = h * 0.47;
+  const proj = p => { const x = p.x * cs - p.z * sn, z = p.x * sn + p.z * cs, py = p.y - ym; const y = py * Math.cos(tilt) - z * Math.sin(tilt), d = py * Math.sin(tilt) + z * Math.cos(tilt); return { x: cx + x * K, y: cy + y * K, d }; };
   // floor ring grid
   const foot = f ? Math.max(f.wl[27].y, f.wl[28].y, f.wl[31].y, f.wl[32].y) : 0.9;
   c.save(); c.strokeStyle = 'rgba(34,230,255,.18)'; c.lineWidth = 1;
-  for (let r = 0.2; r <= 0.8; r += 0.2) { c.beginPath(); for (let a = 0; a <= 64; a++) { const th = a / 64 * Math.PI * 2, p = proj({ x: Math.cos(th) * r, y: foot, z: Math.sin(th) * r }); a ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y); } c.stroke(); }
-  for (let a = 0; a < 8; a++) { const th = a / 8 * Math.PI * 2 + t * 0.2, p0 = proj({ x: 0, y: foot, z: 0 }), p1 = proj({ x: Math.cos(th) * 0.8, y: foot, z: Math.sin(th) * 0.8 }); c.beginPath(); c.moveTo(p0.x, p0.y); c.lineTo(p1.x, p1.y); c.stroke(); }
+  for (let r = span * 0.12; r <= span * 0.5; r += span * 0.12) { c.beginPath(); for (let a = 0; a <= 64; a++) { const th = a / 64 * Math.PI * 2, p = proj({ x: Math.cos(th) * r, y: foot, z: Math.sin(th) * r }); a ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y); } c.stroke(); }
+  for (let a = 0; a < 8; a++) { const th = a / 8 * Math.PI * 2 + t * 0.2, p0 = proj({ x: 0, y: foot, z: 0 }), p1 = proj({ x: Math.cos(th) * span * 0.5, y: foot, z: Math.sin(th) * span * 0.5 }); c.beginPath(); c.moveTo(p0.x, p0.y); c.lineTo(p1.x, p1.y); c.stroke(); }
   c.restore();
   if (!f) { c.font = '600 11px "JetBrains Mono",monospace'; c.fillStyle = '#5E7186'; c.textAlign = 'center'; c.fillText('NO BODY DATA YET', cx, cy); c.textAlign = 'left'; return; }
   const P = f.wl.map(proj);
