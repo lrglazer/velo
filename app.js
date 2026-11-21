@@ -109,7 +109,11 @@ async function loadFile(file) {
   }
   const url = URL.createObjectURL(file);
   if (isHeic || (file.type || '').startsWith('image/') || IMG.test(file.name || '')) return loadImage(url);
-  mediaType = 'video'; media = vid;
+  return loadVideo(url);
+}
+async function loadVideo(url, cors) {
+  resetData(); clip.res = null; $('#play').disabled = false; $('#scrub').disabled = false;
+  mediaType = 'video'; media = vid; if (cors) vid.crossOrigin = 'anonymous'; else vid.removeAttribute('crossorigin');
   vid.src = url; vid.loop = true; vid.playbackRate = +$('#rate').value;
   await new Promise((res, rej) => { vid.onloadeddata = res; vid.onerror = () => rej(new Error('This video format is not supported by your browser.')); }).catch(e => { status(e.message, true); throw e; });
   if (!vid.videoWidth) { status('This video has no picture Velo can read. Try an MP4, or on iPhone set Camera > Formats > Most Compatible.', true); return; }
@@ -1043,7 +1047,9 @@ $('#snap').addEventListener('click', () => {
 
 // ---------- events ----------
 for (const id of ['#file', '#file2']) $(id).addEventListener('change', e => { $('#play').disabled = false; $('#scrub').disabled = false; loadFile(e.target.files[0]); e.target.value = ''; });
-$('#sample').addEventListener('click', () => loadImage('img/sample-squat.jpg'));
+const SAMPLE_VIDEO = 'https://assets.mixkit.co/videos/52082/52082-720.mp4'; // Mixkit free license
+$('#sample').addEventListener('click', () => loadVideo(SAMPLE_VIDEO, true).catch(() => loadImage('img/sample-squat.jpg')));
+$('#samplePhoto').addEventListener('click', e => { e.preventDefault(); loadImage('img/sample-squat.jpg'); });
 document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
   mode = b.dataset.mode; document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); dirty = true;
 }));

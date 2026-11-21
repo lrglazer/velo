@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#0B0E12">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Saira:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <header class="bar">
@@ -34,9 +34,9 @@
         <p class="lede">Squat, sprint start, golf swing, pitch, jump, lift. Velo tracks 33 body landmarks per frame and rebuilds an anatomical model on top of your video.</p>
         <div class="empty-actions">
           <label class="btn primary">Upload a video or photo<input id="file" type="file" accept="video/*,image/*,.heic,.heif,.mov" hidden></label>
-          <button class="btn" id="sample" type="button">Try the sample squat</button>
+          <button class="btn" id="sample" type="button">▶ Play the sample squat video</button>
         </div>
-        <p class="hint">Runs in your browser. Your video never leaves your device.</p>
+        <p class="hint">Runs in your browser. Your video never leaves your device. Or <a href="#" id="samplePhoto">try a sample photo</a>. Sample video: Mixkit.</p>
       </div>
       <div class="loader" id="loader" hidden>
         <div class="rings"><i></i><i></i><i></i><b id="ldPct">0%</b></div>
@@ -130,6 +130,6 @@
 </main>
 
 <video id="vid" playsinline muted preload="auto" hidden></video>
-<script type="module" src="app.js?v=7"></script>
+<script type="module" src="app.js?v=8"></script>
 <img src="https://chalktalkstudy.com/api/px?s=velo" alt="" width="1" height="1" style="position:absolute;opacity:0;pointer-events:none"></body>
 </html>

@@ -136,3 +136,4 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 .sportbadge b{color:#fff;font:600 13px Saira,sans-serif}.sportbadge em{font-style:normal;color:var(--lime);font:500 11px 'JetBrains Mono',monospace}
 .sportbadge.low{border-color:rgba(255,181,71,.5);background:rgba(255,181,71,.08);box-shadow:none}.sportbadge.low i{background:var(--warn);box-shadow:0 0 8px var(--warn)}.sportbadge.low em{color:var(--warn)}
 .sel{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.hint a{color:var(--neon)}
