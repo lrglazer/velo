@@ -288,16 +288,19 @@ $('#angleChips').addEventListener('click', e => {
 });
 
 function chart(cv, series, opt = {}) {
-  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth || 300, h = +cv.getAttribute('height');
-  cv.width = w * dpr; cv.height = h * dpr; cv.style.height = h + 'px';
+  const dpr = Math.min(2, window.devicePixelRatio || 1), w = Math.max(200, cv.clientWidth || cv.parentElement.clientWidth || 300), h = +cv.getAttribute('height');
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px'; }
   const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h);
+  c.fillStyle = 'rgba(4,8,14,.55)'; c.fillRect(0, 0, w, h);
   const pl = 36, pr = opt.right ? 36 : 8, pt = 8, pb = 20;
   c.font = '11px "IBM Plex Sans", sans-serif'; c.fillStyle = '#8B97A6';
+  const has = series.some(s => s.data && s.data.some(Number.isFinite));
+  if (A && A.list.length >= 3 && !has) { c.fillText(series.length ? 'Not enough clear frames for these joints yet.' : 'Pick a joint above to chart it.', pl, h / 2); return; }
   if (!A || A.list.length < 3) { c.fillText(mediaType === 'image' ? 'Upload a video to see this over time.' : 'Play the video to collect frames.', pl, h / 2); return; }
   const t = A.t, t0 = t[0], t1 = t[t.length - 1] || 1;
   const X = x => pl + (x - t0) / ((t1 - t0) || 1) * (w - pl - pr);
   const axis = (vals, side) => {
-    const v = vals.flat().filter(Number.isFinite); let lo = Math.min(...v), hi = Math.max(...v);
+    const v = vals.flat().filter(Number.isFinite); let lo = v.length ? Math.min(...v) : 0, hi = v.length ? Math.max(...v) : 1;
     if (opt.zero && side === 'l') lo = Math.min(lo, 0); if (hi - lo < 1e-6) { hi += 1; lo -= 1; }
     const pad = (hi - lo) * 0.08; lo -= pad; hi += pad; return { lo, hi, Y: y => pt + (1 - (y - lo) / (hi - lo)) * (h - pt - pb) };
   };
@@ -312,12 +315,13 @@ function chart(cv, series, opt = {}) {
   c.fillText(`${fmt(t0, 1)} s`, pl, h - 5); c.fillText(`${fmt(t1, 1)} s`, w - pr - 30, h - 5);
   if (opt.zero) { const y = left.Y(0); c.strokeStyle = '#33404F'; c.beginPath(); c.moveTo(pl, y); c.lineTo(w - pr, y); c.stroke(); }
   for (const s of series) {
-    const ax = s.right ? right : left; c.strokeStyle = s.color; c.lineWidth = 1.8; c.beginPath(); let pen = false;
+    const ax = s.right ? right : left; c.save(); c.strokeStyle = s.color; c.lineWidth = 2; c.shadowColor = s.color; c.shadowBlur = 8; c.beginPath(); let pen = false;
     s.data.forEach((v, i) => { if (!Number.isFinite(v)) { pen = false; return; } const x = X(t[i]), y = ax.Y(v); pen ? c.lineTo(x, y) : c.moveTo(x, y); pen = true; });
-    c.stroke();
+    c.stroke(); c.restore();
   }
   const now = mediaType === 'video' ? vid.currentTime : 0;
-  if (now >= t0 && now <= t1) { c.strokeStyle = '#E7ECF2'; c.globalAlpha = .5; c.beginPath(); c.moveTo(X(now), pt); c.lineTo(X(now), h - pb); c.stroke(); c.globalAlpha = 1; }
+  if (now >= t0 && now <= t1) { c.save(); c.strokeStyle = '#22E6FF'; c.shadowColor = '#22E6FF'; c.shadowBlur = 10; c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(now), pt); c.lineTo(X(now), h - pb); c.stroke(); c.restore();
+    for (const s of series) { const ax = s.right ? right : left, i = A.t.findIndex(x => x >= now); const v = i >= 0 ? s.data[i] : NaN; if (!Number.isFinite(v)) continue; c.fillStyle = s.color; c.beginPath(); c.arc(X(now), ax.Y(v), 3.5, 0, Math.PI * 2); c.fill(); } }
 }
 function drawCharts() {
   const js = JOINTS.filter(j => shownJoints.has(j.id));
@@ -614,7 +618,7 @@ function fxFrame() {
   if (fxc.width !== cw * dpr || fxc.height !== ch * dpr) { fxc.width = cw * dpr; fxc.height = ch * dpr; }
   Object.assign(fxc.style, { left: (r.left - st.left) + 'px', top: (r.top - st.top) + 'px', width: cw + 'px', height: ch + 'px' });
   const c = fctx; c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, cw, ch);
-  if (!media || !W) { drawGauges(null); return; }
+  if (!media || !W) { drawGauges(null); draw3D(null); drawScore(); return; }
   const k = cw / W, t = now / 1000, f = fx.pose, rv = revealY();
   // corner brackets
   const L = Math.min(cw, ch) * 0.07, m = 10, pulse = 0.55 + 0.45 * Math.sin(t * 3);
@@ -660,7 +664,7 @@ function fxFrame() {
   const conf = f ? f.lm.reduce((a, p) => a + p.v, 0) / f.lm.length : 0;
   c.fillStyle = f ? NEON : '#FFB547'; c.fillText(f ? `POSE LOCK · 33 PTS · CONF ${conf.toFixed(2)}` : 'SEARCHING FOR BODY' + '.'.repeat(1 + Math.floor(t * 3) % 3), cw - 16, 26);
   c.fillStyle = '#7F95AA'; c.fillText(`${mediaType === 'video' ? fx.fps + ' FPS · ' : ''}FRAMES ${frames.size} · ${A && A.frontal ? 'FRONTAL' : 'SAGITTAL'} PLANE`, cw - 16, 42); c.textAlign = 'left';
-  drawGauges(f); pushStream(f, conf);
+  drawGauges(f); pushStream(f, conf); draw3D(f); drawScore();
 }
 
 function drawGauges(f) {
@@ -737,6 +741,63 @@ function hero() {
   };
   frame();
 }
+
+// ---------- 3D body model + form score + snapshot ----------
+const BONES = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,29],[29,31],[27,31],[28,30],[30,32],[28,32]];
+const v3 = { yaw: 0.6, drag: null, auto: true, last: performance.now() };
+(() => { const cv = $('#three'); if (!cv) return;
+  cv.addEventListener('pointerdown', e => { v3.drag = { x: e.clientX, yaw: v3.yaw }; v3.auto = false; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointermove', e => { if (v3.drag) v3.yaw = v3.drag.yaw + (e.clientX - v3.drag.x) * 0.012; });
+  const up = () => { v3.drag = null; setTimeout(() => { if (!v3.drag) v3.auto = true; }, 2500); };
+  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up); })();
+function sizeCv(cv) { const dpr = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth || 260, h = +cv.getAttribute('height'); if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px'; } const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h); return [c, w, h]; }
+function draw3D(f) {
+  const cv = $('#three'); if (!cv) return; const [c, w, h] = sizeCv(cv), now = performance.now(), t = now / 1000;
+  if (v3.auto) v3.yaw += (now - v3.last) / 1000 * 0.5; v3.last = now;
+  c.fillStyle = 'rgba(4,8,14,.55)'; c.fillRect(0, 0, w, h);
+  const cx = w / 2, cy = h * 0.46, S = h * 0.56, cs = Math.cos(v3.yaw), sn = Math.sin(v3.yaw), tilt = 0.32;
+  const proj = p => { const x = p.x * cs - p.z * sn, z = p.x * sn + p.z * cs; const y = p.y * Math.cos(tilt) - z * Math.sin(tilt), d = p.y * Math.sin(tilt) + z * Math.cos(tilt); return { x: cx + x * S / 0.95, y: cy + y * S / 0.95, d }; };
+  // floor ring grid
+  const foot = f ? Math.max(f.wl[27].y, f.wl[28].y, f.wl[31].y, f.wl[32].y) : 0.9;
+  c.save(); c.strokeStyle = 'rgba(34,230,255,.18)'; c.lineWidth = 1;
+  for (let r = 0.2; r <= 0.8; r += 0.2) { c.beginPath(); for (let a = 0; a <= 64; a++) { const th = a / 64 * Math.PI * 2, p = proj({ x: Math.cos(th) * r, y: foot, z: Math.sin(th) * r }); a ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y); } c.stroke(); }
+  for (let a = 0; a < 8; a++) { const th = a / 8 * Math.PI * 2 + t * 0.2, p0 = proj({ x: 0, y: foot, z: 0 }), p1 = proj({ x: Math.cos(th) * 0.8, y: foot, z: Math.sin(th) * 0.8 }); c.beginPath(); c.moveTo(p0.x, p0.y); c.lineTo(p1.x, p1.y); c.stroke(); }
+  c.restore();
+  if (!f) { c.font = '600 11px "JetBrains Mono",monospace'; c.fillStyle = '#5E7186'; c.textAlign = 'center'; c.fillText('NO BODY DATA YET', cx, cy); c.textAlign = 'left'; return; }
+  const P = f.wl.map(proj);
+  // shadow on floor
+  c.save(); c.globalAlpha = 0.25; c.fillStyle = '#22E6FF'; for (const i of [27, 28, 23, 24]) { const q = proj({ x: f.wl[i].x, y: foot, z: f.wl[i].z }); c.beginPath(); c.ellipse(q.x, q.y, 8, 3, 0, 0, Math.PI * 2); c.fill(); } c.restore();
+  const bones = BONES.map(([a, b]) => ({ a, b, d: (P[a].d + P[b].d) / 2 })).sort((p, q) => q.d - p.d);
+  for (const { a, b, d } of bones) { const left = a % 2 === 1 && b % 2 === 1, col = a >= 23 && b >= 23 ? (left ? '#22E6FF' : '#FF3DA6') : left ? '#7FE9FF' : '#FF9AD0', al = 0.55 + 0.45 * Math.max(0, Math.min(1, 0.5 - d));
+    glowLine(c, [P[a], P[b]], col, 3, al); }
+  const head = P[0]; c.save(); c.strokeStyle = '#B6FF3B'; c.shadowColor = '#B6FF3B'; c.shadowBlur = 10; c.lineWidth = 2; c.beginPath(); c.arc(head.x, head.y, h * 0.045, 0, Math.PI * 2); c.stroke(); c.restore();
+  for (const i of [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]) { c.fillStyle = '#fff'; c.beginPath(); c.arc(P[i].x, P[i].y, 2.6, 0, Math.PI * 2); c.fill(); }
+  const com = proj(mid3(f.wl[23], f.wl[24])); c.save(); c.strokeStyle = '#B6FF3B'; c.setLineDash([3, 4]); c.beginPath(); c.moveTo(com.x, com.y); c.lineTo(proj({ ...mid3(f.wl[23], f.wl[24]), y: foot }).x, proj({ ...mid3(f.wl[23], f.wl[24]), y: foot }).y); c.stroke(); c.restore();
+  c.font = '600 10px "JetBrains Mono",monospace'; c.fillStyle = '#5E7186'; c.fillText('YAW ' + (((v3.yaw * 180 / Math.PI) % 360 + 360) % 360).toFixed(0) + '°', 8, h - 8);
+}
+const mid3 = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
+const SC = { v: 0 };
+function drawScore() {
+  const cv = $('#score'); if (!cv) return; const [c, w, h] = sizeCv(cv), t = performance.now() / 1000;
+  c.fillStyle = 'rgba(4,8,14,.55)'; c.fillRect(0, 0, w, h);
+  const ch = A ? techniqueChecks().filter(x => x.s !== 'idle') : [], target = ch.length ? ch.reduce((a, x) => a + (x.s === 'ok' ? 100 : x.s === 'warn' ? 72 : 45), 0) / ch.length : 0;
+  SC.v += (target - SC.v) * 0.06; const v = SC.v, cx = w / 2, cy = h * 0.45, R = Math.min(w * 0.36, 78);
+  const col = !ch.length ? '#3A4656' : v >= 90 ? '#3DDC97' : v >= 70 ? '#FFB547' : '#FF5A3C';
+  c.lineCap = 'round'; c.lineWidth = 10; c.strokeStyle = 'rgba(255,255,255,.06)'; c.beginPath(); c.arc(cx, cy, R, 0, Math.PI * 2); c.stroke();
+  c.save(); c.shadowColor = col; c.shadowBlur = 18; c.strokeStyle = col; c.beginPath(); c.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * v / 100); c.stroke(); c.restore();
+  c.save(); c.translate(cx, cy); c.rotate(t * 0.8); c.strokeStyle = 'rgba(34,230,255,.35)'; c.lineWidth = 1; c.setLineDash([2, 7]); c.beginPath(); c.arc(0, 0, R + 14, 0, Math.PI * 2); c.stroke(); c.restore();
+  c.textAlign = 'center'; c.fillStyle = '#fff'; c.font = '700 34px Saira,sans-serif'; c.fillText(ch.length ? Math.round(v) : '--', cx, cy + 10);
+  c.font = '600 10px "JetBrains Mono",monospace'; c.fillStyle = '#8B97A6'; c.fillText('/ 100', cx, cy + 28);
+  const grade = !ch.length ? 'WAITING' : v >= 90 ? 'CLEAN REP' : v >= 70 ? 'SOLID, TWEAK IT' : 'NEEDS WORK';
+  c.font = '700 12px "JetBrains Mono",monospace'; c.fillStyle = col; c.fillText(grade, cx, h - 34);
+  c.font = '500 10px "IBM Plex Sans",sans-serif'; c.fillStyle = '#6C7A8B'; c.fillText(ch.length ? `${ch.filter(x => x.s === 'ok').length} of ${ch.length} checks passed` : 'from the technique checks', cx, h - 16); c.textAlign = 'left';
+}
+$('#snap').addEventListener('click', () => {
+  if (!media) return; const out = document.createElement('canvas'); out.width = view.width; out.height = view.height; const o = out.getContext('2d');
+  o.drawImage(view, 0, 0); o.drawImage(fxc, 0, 0, out.width, out.height);
+  o.font = `600 ${Math.round(out.width / 45)}px "JetBrains Mono",monospace`; o.fillStyle = '#22E6FF'; o.fillText('VELO · markerless motion lab', 16, out.height - 16);
+  const a = document.createElement('a'); a.download = 'velo-analysis.png'; a.href = out.toDataURL('image/png'); a.click();
+});
 
 // ---------- events ----------
 for (const id of ['#file', '#file2']) $(id).addEventListener('change', e => { $('#play').disabled = false; $('#scrub').disabled = false; loadFile(e.target.files[0]); e.target.value = ''; });

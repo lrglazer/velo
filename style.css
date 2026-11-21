@@ -126,3 +126,6 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 .chip[aria-pressed="true"]{border-color:var(--neon);box-shadow:0 0 10px -2px rgba(34,230,255,.6)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 @media (max-width:900px){.stage{min-height:540px}.empty{justify-content:flex-start;padding-top:28px}}
+.duo{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:14px}
+#three,#score{width:100%;display:block;cursor:grab}#three:active{cursor:grabbing}#score{cursor:default}
+@media (max-width:560px){.duo{grid-template-columns:1fr}}

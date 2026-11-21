@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#0B0E12">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Saira:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <header class="bar">
@@ -68,6 +68,7 @@
         <label><input type="checkbox" id="tTriad" checked> Joint axes</label>
         <label><input type="checkbox" id="tGrid" checked> Floor grid</label>
         <label><input type="checkbox" id="tForce" checked> Force</label>
+        <button class="btn small" id="snap" type="button">Save snapshot</button>
         <label class="btn small">New video<input id="file2" type="file" accept="video/*,image/*,.heic,.heif,.mov" hidden></label>
       </div>
     </div>
@@ -85,6 +86,11 @@
       <div class="block-head"><h2>Live telemetry</h2><span class="live"><i></i><span id="fps">0</span> fps</span></div>
       <canvas class="gauges" id="gauges" height="128"></canvas>
       <pre class="stream" id="stream">Waiting for a body to track…</pre>
+    </section>
+
+    <section class="block duo">
+      <div class="b3d"><div class="block-head"><h2>3D body model</h2><span class="muted">drag to rotate</span></div><canvas id="three" height="250"></canvas></div>
+      <div class="bscore"><div class="block-head"><h2>Form score</h2></div><canvas id="score" height="250"></canvas></div>
     </section>
 
     <section class="block">
@@ -119,6 +125,6 @@
 </main>
 
 <video id="vid" playsinline muted preload="auto" hidden></video>
-<script type="module" src="app.js?v=2"></script>
+<script type="module" src="app.js?v=3"></script>
 <img src="https://chalktalkstudy.com/api/px?s=velo" alt="" width="1" height="1" style="position:absolute;opacity:0;pointer-events:none"></body>
 </html>
