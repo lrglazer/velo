@@ -400,7 +400,7 @@ let clipP = null; const clip = { busy: false, res: null };
 async function clipClassify(img) {
   if (!clipP) clipP = (async () => { const T = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2'); T.env.allowLocalModels = false;
     return T.pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32'); })().catch(e => { clipP = null; throw e; });
-  const clf = await clipP, cv = document.createElement('canvas'), k = Math.min(1, 448 / Math.max(img.naturalWidth || img.videoWidth, img.naturalHeight || img.videoHeight));
+  const clf = await clipP; clip.ready = true; updatePanel(); const cv = document.createElement('canvas'), k = Math.min(1, 448 / Math.max(img.naturalWidth || img.videoWidth, img.naturalHeight || img.videoHeight));
   cv.width = Math.round((img.naturalWidth || img.videoWidth) * k); cv.height = Math.round((img.naturalHeight || img.videoHeight) * k); cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
   const out = await clf(cv.toDataURL('image/jpeg', 0.9), LABELS.map(l => l[1]), { hypothesis_template: 'a photo of {}' });
   return out.map(o => { const L = LABELS.find(l => l[1] === o.label); return { name: L[0], fam: L[2], p: o.score }; });
@@ -511,7 +511,7 @@ function updatePanel() {
   $('#kRomJ').textContent = A && !single ? A.primary.name.toLowerCase() : 'degrees';
   $('#viewNote').textContent = !A ? 'Upload to analyze' : (A.frontal ? 'Front view detected' : 'Side view detected') + ` · ${A.list.length} frame${A.list.length === 1 ? '' : 's'}`;
   const sp = currentSport(); const sb = $('#sportBadge');
-  if (sb) { sb.hidden = !A; if (A) { sb.querySelector('span').textContent = sp.manual ? 'Sport' : 'Detected'; sb.querySelector('b').textContent = sp.name; sb.querySelector('em').textContent = clip.busy ? 'AI identifying…' : sp.manual ? 'set by you' : Math.round(sp.conf * 100) + '% sure' + (sp.ai ? ' · AI vision' : ' · from pose'); sb.classList.toggle('low', !sp.manual && sp.conf < 0.45); sb.title = sp.alt ? 'Also possible: ' + sp.alt.map(x => x.name + ' ' + Math.round(x.p * 100) + '%').join(', ') : ''; } }
+  if (sb) { sb.hidden = !A; if (A) { sb.querySelector('span').textContent = sp.manual ? 'Sport' : 'Detected'; sb.querySelector('b').textContent = sp.name; sb.querySelector('em').textContent = clip.busy ? (clipP && clip.ready ? 'AI identifying…' : 'loading AI vision (first time ~1 min)…') : sp.manual ? 'set by you' : Math.round(sp.conf * 100) + '% sure' + (sp.ai ? ' · AI vision' : ' · from pose'); sb.classList.toggle('low', !sp.manual && sp.conf < 0.45); sb.title = sp.alt ? 'Also possible: ' + sp.alt.map(x => x.name + ' ' + Math.round(x.p * 100) + '%').join(', ') : ''; } }
   $('#handWrap').hidden = !['golf', 'throw', 'racket', 'shoot', 'bat'].includes(sp.id);
   $('#hudView').textContent = !A ? '—' : A.frontal ? 'Front view' : 'Side view';
   const checks = techniqueChecks();
